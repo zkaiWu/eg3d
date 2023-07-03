@@ -333,7 +333,6 @@ def main(**kwargs):
         assert False, "Need to specify config"
 
 
-
     if opts.density_reg > 0:
         c.G_reg_interval = opts.density_reg_every
     c.G_kwargs.rendering_kwargs = rendering_options
