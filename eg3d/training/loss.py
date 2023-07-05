@@ -77,6 +77,7 @@ class StyleGAN2Loss(Loss):
                 f = torch.arange(-blur_size, blur_size + 1, device=img['image'].device).div(blur_sigma).square().neg().exp2()
                 img['image'] = upfirdn2d.filter2d(img['image'], f / f.sum())
 
+        # concat image_raw and image just when augement_pipe is used
         if self.augment_pipe is not None:
             augmented_pair = self.augment_pipe(torch.cat([img['image'],
                                                     torch.nn.functional.interpolate(img['image_raw'], size=img['image'].shape[2:], mode='bilinear', antialias=True)],
