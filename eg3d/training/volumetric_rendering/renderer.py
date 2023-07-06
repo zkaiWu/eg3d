@@ -128,6 +128,7 @@ class ImportanceRenderer(torch.nn.Module):
             colors_fine = colors_fine.reshape(batch_size, num_rays, N_importance, colors_fine.shape[-1])
             densities_fine = densities_fine.reshape(batch_size, num_rays, N_importance, 1)
 
+            # combine all the samples
             all_depths, all_colors, all_densities = self.unify_samples(depths_coarse, colors_coarse, densities_coarse,
                                                                   depths_fine, colors_fine, densities_fine)
 

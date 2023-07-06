@@ -16,6 +16,7 @@ from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
 from torch_utils.ops import upfirdn2d
 from training.dual_discriminator import filtered_resizing
+from training.training_utils import sample_patch_params, linear_schedule
 
 #----------------------------------------------------------------------------
 
@@ -26,7 +27,7 @@ class Loss:
 #----------------------------------------------------------------------------
 
 class StyleGAN2Loss(Loss):
-    def __init__(self, device, G, D, augment_pipe=None, r1_gamma=10, style_mixing_prob=0, pl_weight=0, pl_batch_shrink=2, pl_decay=0.01, pl_no_weight_grad=False, blur_init_sigma=0, blur_fade_kimg=0, r1_gamma_init=0, r1_gamma_fade_kimg=0, neural_rendering_resolution_initial=64, neural_rendering_resolution_final=None, neural_rendering_resolution_fade_kimg=0, gpc_reg_fade_kimg=1000, gpc_reg_prob=None, dual_discrimination=False, filter_mode='antialiased'):
+    def __init__(self, device, G, D, augment_pipe=None, r1_gamma=10, style_mixing_prob=0, pl_weight=0, pl_batch_shrink=2, pl_decay=0.01, pl_no_weight_grad=False, blur_init_sigma=0, blur_fade_kimg=0, r1_gamma_init=0, r1_gamma_fade_kimg=0, neural_rendering_resolution_initial=64, neural_rendering_resolution_final=None, neural_rendering_resolution_fade_kimg=0, gpc_reg_fade_kimg=1000, gpc_reg_prob=None, dual_discrimination=False, filter_mode='antialiased', patch_cfg={}):
         super().__init__()
         self.device             = device
         self.G                  = G
@@ -52,9 +53,26 @@ class StyleGAN2Loss(Loss):
         self.filter_mode = filter_mode
         self.resample_filter = upfirdn2d.setup_filter([1,3,3,1], device=device)
         self.blur_raw_target = True
+        self.patch_cfg = patch_cfg
         assert self.gpc_reg_prob is None or (0 <= self.gpc_reg_prob <= 1)
 
+        self.progressive_update(0)
+
+
+    def progressive_update(self, cur_kimg: int):
+        if self.patch_cfg['enabled']:
+            if self.patch_cfg['distribution'] in ('uniform', 'discrete_uniform'):
+                self.patch_cfg['min_scale'] = linear_schedule(cur_kimg, self.patch_cfg['max_scale'], self.patch_cfg['min_scale'], self.patch_cfg['anneal_kimg'])
+            elif self.patch_cfg['distribution'] == 'beta':
+                self.patch_cfg['beta'] = linear_schedule(cur_kimg, self.patch_cfg['beta_val_start'], self.patch_cfg['beta_val_end'], self.patch_cfg['anneal_kimg'])
+                self.patch_cfg['min_scale'] = self.patch_cfg['min_scale']
+            else:
+                raise NotImplementedError(f"Uknown patch distribution: {self.patch_cfg['distribution']}")
+        # self.gpc_spoof_p = linear_schedule(cur_kimg, 1.0, self.cfg.model.generator.camera_cond_spoof_p, 1000)
+
+
     def run_G(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
+        # figure out the usage of swapping prob 
         if swapping_prob is not None:
             c_swapped = torch.roll(c.clone(), 1, 0)
             c_gen_conditioning = torch.where(torch.rand((c.shape[0], 1), device=c.device) < swapping_prob, c_swapped, c)
@@ -67,7 +85,10 @@ class StyleGAN2Loss(Loss):
                 cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
                 cutoff = torch.where(torch.rand([], device=ws.device) < self.style_mixing_prob, cutoff, torch.full_like(cutoff, ws.shape[1]))
                 ws[:, cutoff:] = self.G.mapping(torch.randn_like(z), c, update_emas=False)[:, cutoff:]
-        gen_output = self.G.synthesis(ws, c, neural_rendering_resolution=neural_rendering_resolution, update_emas=update_emas)
+
+        patch_params = sample_patch_params(len(z), self.patch_cfg, device=z.device) if self.patch_cfg['enabled'] else None
+        gen_output = self.G.synthesis(ws, c, neural_rendering_resolution=neural_rendering_resolution, update_emas=update_emas, patch_params=patch_params)
+        import pdb; pdb.set_trace()
         return gen_output, ws
 
     def run_D(self, img, c, blur_sigma=0, blur_sigma_raw=0, update_emas=False):

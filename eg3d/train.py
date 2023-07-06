@@ -193,6 +193,15 @@ def parse_comma_separated_list(s):
 @click.option('--reg_type', help='Type of regularization', metavar='STR',  type=click.Choice(['l1', 'l1-alt', 'monotonic-detach', 'monotonic-fixed', 'total-variation']), required=False, default='l1')
 @click.option('--decoder_lr_mul',    help='decoder learning rate multiplier.', metavar='FLOAT', type=click.FloatRange(min=0), default=1, required=False, show_default=True)
 
+# patch cfg
+@click.option('--patch_enable',    help='whether to use patch rendering', metavar='BOOL',  type=bool, required=False, default=True)
+@click.option('--patch_distribution',    help='patch distribution', metavar='STR',  type=click.Choice(['uniform', 'beta']), required=False, default='beta')
+@click.option('--min_scale',    help='min scale of the patch', metavar='FLOAT',  type=float, required=False, default=0.25)
+@click.option('--max_scale',    help='max scale of the patch', metavar='FLOAT',  type=float, required=False, default=1.0)
+@click.option('--alpha',    help='alpha in patch scale scheduler', metavar='FLOAT',  type=float, required=False, default=1.0)
+@click.option('--beta_val_start',    help='beta start in patch scale scheduler', metavar='FLOAT',  type=float, required=False, default=0.001)
+@click.option('--beta_val_end',    help='beta end in patch scale scheduler', metavar='FLOAT',  type=float, required=False, default=0.8)
+@click.option('--anneal_kimg',    help='anneal_kimg when progressive update', metavar='INT',  type=int, required=False, default=10000)
 def main(**kwargs):
     """Train a GAN using the techniques described in the paper
     "Alias-Free Generative Adversarial Networks".
@@ -265,7 +274,12 @@ def main(**kwargs):
     # Base configuration.
     c.ema_kimg = c.batch_size * 10 / 32
     c.G_kwargs.class_name = 'training.triplane.TriPlaneGenerator'
-    c.D_kwargs.class_name = 'training.dual_discriminator.DualDiscriminator'
+
+    if not opts.patch_enable:
+        c.D_kwargs.class_name = 'training.dual_discriminator.DualDiscriminator'
+    else:
+        c.D_kwargs.class_name = 'training.epigraf_discriminator.Discriminator'
+
     c.G_kwargs.fused_modconv_default = 'inference_only' # Speed up training by using regular convolutions instead of grouped convolutions.
     c.loss_kwargs.filter_mode = 'antialiased' # Filter mode for raw images ['antialiased', 'none', float [0-1]]
     c.D_kwargs.disc_c_noise = opts.disc_c_noise # Regularization for discriminator pose conditioning
@@ -333,7 +347,6 @@ def main(**kwargs):
         assert False, "Need to specify config"
 
 
-
     if opts.density_reg > 0:
         c.G_reg_interval = opts.density_reg_every
     c.G_kwargs.rendering_kwargs = rendering_options
@@ -347,9 +360,28 @@ def main(**kwargs):
     c.loss_kwargs.neural_rendering_resolution_initial = opts.neural_rendering_resolution_initial
     c.loss_kwargs.neural_rendering_resolution_final = opts.neural_rendering_resolution_final
     c.loss_kwargs.neural_rendering_resolution_fade_kimg = opts.neural_rendering_resolution_fade_kimg
+
+    # patch config
+    c.loss_kwargs.patch_cfg = {
+        'enabled': opts.patch_enable,
+        'distribution': opts.patch_distribution,
+        'min_scale': opts.min_scale,
+        'max_scale': opts.max_scale,
+        'alpha': opts.alpha,
+        'beta_val_start': opts.beta_val_start,
+        'beta_val_end': opts.beta_val_end,
+        'mbstd_group_size': opts.mbstd_group,
+        'anneal_kimg': opts.anneal_kimg,
+    }
+
+    
     c.G_kwargs.sr_num_fp16_res = opts.sr_num_fp16_res
 
     c.G_kwargs.sr_kwargs = dnnlib.EasyDict(channel_base=opts.cbase, channel_max=opts.cmax, fused_modconv_default='inference_only')
+    
+    c.G_kwargs.patch_cfg = c.loss_kwargs.patch_cfg
+
+    c.D_kwargs.patch_cfg = c.loss_kwargs.patch_cfg
 
     c.loss_kwargs.style_mixing_prob = opts.style_mixing_prob
 

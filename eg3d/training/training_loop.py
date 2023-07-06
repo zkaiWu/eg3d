@@ -29,6 +29,7 @@ import legacy
 from metrics import metric_main
 from camera_utils import LookAtPoseSampler
 from training.crosssection_utils import sample_cross_section
+from training.training_utils import sample_patch_params
 
 #----------------------------------------------------------------------------
 
@@ -154,10 +155,17 @@ def training_loop(
     # Construct networks.
     if rank == 0:
         print('Constructing networks...')
-    common_kwargs = dict(c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
-    G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+    G_common_kwargs = dict(c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
+    D_common_kwargs = copy.deepcopy(G_common_kwargs)
+
+    # when using patch the resolution of input image is scaled by min_scale
+    if D_kwargs.patch_cfg['enabled'] == True:
+        img_resolution_patch = training_set.resolution * D_kwargs.patch_cfg['min_scale']
+        D_common_kwargs.img_resolution = img_resolution_patch
+    
+    G = dnnlib.util.construct_class_by_name(**G_kwargs, **G_common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     G.register_buffer('dataset_label_std', torch.tensor(training_set.get_label_std()).to(device))
-    D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+    D = dnnlib.util.construct_class_by_name(**D_kwargs, **D_common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     G_ema = copy.deepcopy(G).eval()
 
     # Resume from existing pickle.
@@ -169,11 +177,12 @@ def training_loop(
             misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
 
     # Print network summary tables.
-    if rank == 0:
-        z = torch.empty([batch_gpu, G.z_dim], device=device)
-        c = torch.empty([batch_gpu, G.c_dim], device=device)
-        img = misc.print_module_summary(G, [z, c])
-        misc.print_module_summary(D, [img, c])
+    # NOTE: run step before training for debugging
+    # if rank == 0:
+    #     z = torch.empty([batch_gpu, G.z_dim], device=device)
+    #     c = torch.empty([batch_gpu, G.c_dim], device=device)
+    #     img = misc.print_module_summary(G, [z, c])
+    #     misc.print_module_summary(D, [img, c])
 
     # Setup augmentation.
     if rank == 0:
@@ -325,6 +334,9 @@ def training_loop(
             adjust = np.sign(ada_stats['Loss/signs/real'] - ada_target) * (batch_size * ada_interval) / (ada_kimg * 1000)
             augment_pipe.p.copy_((augment_pipe.p + adjust).max(misc.constant(0, device=device)))
 
+        # update for beta
+        loss.progressive_update(cur_nimg / 1000)
+
         # Perform maintenance tasks once per tick.
         done = (cur_nimg >= total_kimg * 1000)
         if (not done) and (cur_tick != 0) and (cur_nimg < tick_start_nimg + kimg_per_tick * 1000):
@@ -344,6 +356,7 @@ def training_loop(
         fields += [f"reserved {training_stats.report0('Resources/peak_gpu_mem_reserved_gb', torch.cuda.max_memory_reserved(device) / 2**30):<6.2f}"]
         torch.cuda.reset_peak_memory_stats()
         fields += [f"augment {training_stats.report0('Progress/augment', float(augment_pipe.p.cpu()) if augment_pipe is not None else 0):.3f}"]
+        fields += [f"Dloss {stats_collector['Loss/D/loss']:<4.3f}"]
         training_stats.report0('Timing/total_hours', (tick_end_time - start_time) / (60 * 60))
         training_stats.report0('Timing/total_days', (tick_end_time - start_time) / (24 * 60 * 60))
         if rank == 0:

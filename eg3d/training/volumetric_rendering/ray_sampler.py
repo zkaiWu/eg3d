@@ -21,7 +21,7 @@ class RaySampler(torch.nn.Module):
         self.ray_origins_h, self.ray_directions, self.depths, self.image_coords, self.rendering_options = None, None, None, None, None
 
 
-    def forward(self, cam2world_matrix, intrinsics, resolution):
+    def forward(self, cam2world_matrix, intrinsics, resolution, patch_params=None):
         """
         Create batches of rays and return origins and directions.
 
@@ -48,7 +48,14 @@ class RaySampler(torch.nn.Module):
         y_cam = uv[:, :, 1].view(N, -1)
         z_cam = torch.ones((N, M), device=cam2world_matrix.device)
 
-        x_lift = (x_cam - cx.unsqueeze(-1) + cy.unsqueeze(-1)*sk.unsqueeze(-1)/fy.unsqueeze(-1) - sk.unsqueeze(-1)*y_cam/fy.unsqueeze(-1)) / fx.unsqueeze(-1) * z_cam
+        if patch_params is not None:
+            patch_scales, patch_offsets = patch_params['scales'], patch_params['offsets']
+            # Then, multiply by the patch size
+            x_cam = x_cam * patch_scales[:, 0].view(N, 1) + patch_offsets[:, 0].view(N, 1)
+            y_cam = y_cam * patch_scales[:, 1].view(N, 1) + patch_offsets[:, 1].view(N, 1) # [compute_batch_size, h * w]
+
+        # NOTE: ?????, in dataset, sk is always 0
+        x_lift = (x_cam - cx.unsqueeze(-1) + cy.unsqueeze(-1) * sk.unsqueeze(-1) / fy.unsqueeze(-1) - sk.unsqueeze(-1) * y_cam / fy.unsqueeze(-1)) / fx.unsqueeze(-1) * z_cam
         y_lift = (y_cam - cy.unsqueeze(-1)) / fy.unsqueeze(-1) * z_cam
 
         cam_rel_points = torch.stack((x_lift, y_lift, z_cam, torch.ones_like(z_cam)), dim=-1)

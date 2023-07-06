@@ -27,6 +27,7 @@ class TriPlaneGenerator(torch.nn.Module):
         mapping_kwargs      = {},   # Arguments for MappingNetwork.
         rendering_kwargs    = {},
         sr_kwargs = {},
+        patch_cfg = {},
         **synthesis_kwargs,         # Arguments for SynthesisNetwork.
     ):
         super().__init__()
@@ -38,8 +39,14 @@ class TriPlaneGenerator(torch.nn.Module):
         self.renderer = ImportanceRenderer()
         self.ray_sampler = RaySampler()
         self.backbone = StyleGAN2Backbone(z_dim, c_dim, w_dim, img_resolution=256, img_channels=32*3, mapping_kwargs=mapping_kwargs, **synthesis_kwargs)
-        self.superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['superresolution_module'], channels=32, img_resolution=img_resolution, sr_num_fp16_res=sr_num_fp16_res, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
-        self.decoder = OSGDecoder(32, {'decoder_lr_mul': rendering_kwargs.get('decoder_lr_mul', 1), 'decoder_output_dim': 32})
+        self.patch_cfg = patch_cfg
+        
+        if not self.patch_cfg['enabled']:
+            self.superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['superresolution_module'], channels=32, img_resolution=img_resolution, sr_num_fp16_res=sr_num_fp16_res, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
+            self.decoder = OSGDecoder(32, {'decoder_lr_mul': rendering_kwargs.get('decoder_lr_mul', 1), 'decoder_output_dim': 32})
+        else:
+            # NOTE: decoder to directly rgb
+            self.decoder = OSGDecoder(32, {'decoder_lr_mul': rendering_kwargs.get('decoder_lr_mul', 1), 'decoder_output_dim': 3})
         self.neural_rendering_resolution = 64
         self.rendering_kwargs = rendering_kwargs
     
@@ -50,7 +57,7 @@ class TriPlaneGenerator(torch.nn.Module):
                 c = torch.zeros_like(c)
         return self.backbone.mapping(z, c * self.rendering_kwargs.get('c_scale', 0), truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
 
-    def synthesis(self, ws, c, neural_rendering_resolution=None, update_emas=False, cache_backbone=False, use_cached_backbone=False, **synthesis_kwargs):
+    def synthesis(self, ws, c, neural_rendering_resolution=None, update_emas=False, cache_backbone=False, use_cached_backbone=False, patch_params=None, **synthesis_kwargs):
         cam2world_matrix = c[:, :16].view(-1, 4, 4)
         intrinsics = c[:, 16:25].view(-1, 3, 3)
 
@@ -60,7 +67,7 @@ class TriPlaneGenerator(torch.nn.Module):
             self.neural_rendering_resolution = neural_rendering_resolution
 
         # Create a batch of rays for volume rendering
-        ray_origins, ray_directions = self.ray_sampler(cam2world_matrix, intrinsics, neural_rendering_resolution)
+        ray_origins, ray_directions = self.ray_sampler(cam2world_matrix, intrinsics, neural_rendering_resolution, patch_params)
 
         # Create triplanes by running StyleGAN backbone
         N, M, _ = ray_origins.shape
@@ -84,9 +91,13 @@ class TriPlaneGenerator(torch.nn.Module):
 
         # Run superresolution to get final image
         rgb_image = feature_image[:, :3]
-        sr_image = self.superresolution(rgb_image, feature_image, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
+        # sr_image = self.superresolution(rgb_image, feature_image, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
 
-        return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image}
+        if self.patch_cfg['enabled']:
+            return {'image': rgb_image, 'image_raw': rgb_image, 'image_depth': depth_image}
+        else:
+            sr_image = self.superresolution(rgb_image, feature_image, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
+            return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image}
     
     def sample(self, coordinates, directions, z, c, truncation_psi=1, truncation_cutoff=None, update_emas=False, **synthesis_kwargs):
         # Compute RGB features, density for arbitrary 3D coordinates. Mostly used for extracting shapes. 
