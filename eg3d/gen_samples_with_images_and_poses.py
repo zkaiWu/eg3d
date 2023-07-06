@@ -111,9 +111,6 @@ def create_cam2world_angle(sample_num, angle_p_range, angle_y_range):
     return list(zip(angle_y_sample_list, angle_p_sample_list))
 
 
-
-
-
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
 @click.option('--seeds', type=parse_range, help='List of random seeds (e.g., \'0,1,4-6\')', required=True)
