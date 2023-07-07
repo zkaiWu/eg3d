@@ -3,11 +3,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.torch_utils import misc
-from src.torch_utils import persistence
-from src.torch_utils.ops import conv2d_resample
-from src.torch_utils.ops import upfirdn2d
-from src.torch_utils.ops import bias_act
+from torch_utils import misc
+from torch_utils import persistence
+from torch_utils.ops import conv2d_resample
+from torch_utils.ops import upfirdn2d
+from torch_utils.ops import bias_act
 
 #----------------------------------------------------------------------------
 
@@ -83,9 +83,9 @@ class MappingNetwork(torch.nn.Module):
         super().__init__()
         if camera_cond:
             if camera_raw_scalars:
-                self.camera_scalar_enc = ScalarEncoder1d(coord_dim=2, x_multiplier=0.0, const_emb_dim=0, use_raw=True)
+                self.camera_scalar_enc = ScalarEncoder1d(coord_dim=25, x_multiplier=0.0, const_emb_dim=0, use_raw=True)
             else:
-                self.camera_scalar_enc = ScalarEncoder1d(coord_dim=2, x_multiplier=64.0, const_emb_dim=0)
+                self.camera_scalar_enc = ScalarEncoder1d(coord_dim=25, x_multiplier=64.0, const_emb_dim=0)
             c_dim = c_dim + self.camera_scalar_enc.get_dim()
             assert self.camera_scalar_enc.get_dim() > 0
         else:
@@ -136,7 +136,8 @@ class MappingNetwork(torch.nn.Module):
             camera_angles = camera_angles[:, [0, 1]] # [batch_size, 2]
             if self.training and self.camera_cond_noise_std > 0:
                 camera_angles = camera_angles + self.camera_cond_noise_std * torch.randn_like(camera_angles) * camera_angles.std(dim=0, keepdim=True) # [batch_size, 2]
-            camera_angles = camera_angles.sign() * ((camera_angles.abs() % (2.0 * np.pi)) / (2.0 * np.pi)) # [batch_size, 2]
+            # NOTE: we use camera extrinsics and intrinsics as input
+            # camera_angles = camera_angles.sign() * ((camera_angles.abs() % (2.0 * np.pi)) / (2.0 * np.pi)) # [batch_size, 2]
             camera_angles_embs = self.camera_scalar_enc(camera_angles) # [batch_size, fourier_dim]
             camera_angles_embs = F.dropout(camera_angles_embs, p=self.camera_cond_drop_p, training=self.training) # [batch_size, fourier_dim]
             c = torch.zeros(len(camera_angles_embs), 0, device=camera_angles_embs.device) if c is None else c # [batch_size, c_dim]

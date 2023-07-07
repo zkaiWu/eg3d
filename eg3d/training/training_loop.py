@@ -20,6 +20,7 @@ import PIL.Image
 import numpy as np
 import torch
 import dnnlib
+import math
 from torch_utils import misc
 from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
@@ -161,7 +162,8 @@ def training_loop(
     # when using patch the resolution of input image is scaled by min_scale
     if D_kwargs.patch_cfg['enabled'] == True:
         img_resolution_patch = training_set.resolution * D_kwargs.patch_cfg['min_scale']
-        D_common_kwargs.img_resolution = img_resolution_patch
+        D_common_kwargs['img_resolution'] = img_resolution_patch
+        D_kwargs['num_additional_start_blocks'] = int(math.log2(int(1 / D_kwargs.patch_cfg['min_scale'])))
     
     G = dnnlib.util.construct_class_by_name(**G_kwargs, **G_common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     G.register_buffer('dataset_label_std', torch.tensor(training_set.get_label_std()).to(device))
@@ -289,6 +291,7 @@ def training_loop(
             # Accumulate gradients.
             phase.opt.zero_grad(set_to_none=True)
             phase.module.requires_grad_(True)
+
             for real_img, real_c, gen_z, gen_c in zip(phase_real_img, phase_real_c, phase_gen_z, phase_gen_c):
                 loss.accumulate_gradients(phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, gain=phase.interval, cur_nimg=cur_nimg)
             phase.module.requires_grad_(False)

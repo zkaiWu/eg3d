@@ -1,12 +1,11 @@
 from typing import Dict, List
 import numpy as np
 import torch
-from omegaconf import DictConfig
-from eg3d.torch_utils import misc
-from eg3d.torch_utils import persistence
-from eg3d.torch_utils.ops import upfirdn2d
+from torch_utils import misc
+from torch_utils import persistence
+from torch_utils.ops import upfirdn2d
 
-from eg3d.training.layers import (
+from eg3d.training.epigraf_layers import (
     FullyConnectedLayer,
     MappingNetwork,
     Conv2dLayer,
@@ -185,6 +184,8 @@ class Discriminator(torch.nn.Module):
         num_fp16_res        = 4,        # Use FP16 for the N highest resolutions.
         conv_clamp          = 256,      # Clamp the output of convolution layers to +-X, None = disable clamping.
         cmap_dim            = None,     # Dimensionality of mapped conditioning label, None = default.
+        disc_c_noise        = 0,        # Corrupt camera parameters with X std dev of noise before disc. pose conditioning.
+        num_additional_start_blocks = 0, # Number of additional start blocks.
         block_kwargs        = {},       # Arguments for DiscriminatorBlock.
         mapping_kwargs      = {},       # Arguments for MappingNetwork.
         epilogue_kwargs     = {},       # Arguments for DiscriminatorEpilogue.
@@ -193,7 +194,8 @@ class Discriminator(torch.nn.Module):
         super().__init__()
 
         self.c_dim = c_dim
-        self.img_resolution = img_resolution * (2 ** self.cfg.num_additional_start_blocks)
+        self.num_additional_start_blocks = num_additional_start_blocks
+        self.img_resolution = img_resolution * (2 ** self.num_additional_start_blocks)
         self.img_resolution_log2 = int(np.log2(self.img_resolution))
         self.block_resolutions = [2 ** i for i in range(self.img_resolution_log2, 2, -1)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions + [4]}
@@ -236,7 +238,7 @@ class Discriminator(torch.nn.Module):
             tmp_channels = channels_dict[res]
             out_channels = channels_dict[res // 2]
             use_fp16 = (res >= fp16_resolution)
-            down = 1 if i < self.cfg.num_additional_start_blocks else 2
+            down = 1 if i < self.num_additional_start_blocks else 2
             block = DiscriminatorBlock(
                 in_channels, tmp_channels, out_channels, resolution=res, first_layer_idx=cur_layer_idx, use_fp16=use_fp16,
                 down=down, c_dim=hyper_mod_dim, hyper_mod=True, **block_kwargs, **common_kwargs)
@@ -252,6 +254,8 @@ class Discriminator(torch.nn.Module):
         self.b4 = DiscriminatorEpilogue(
             channels_dict[4], cmap_dim=cmap_dim, resolution=4, **epilogue_kwargs, **common_kwargs)
 
+        self.disc_c_noise = disc_c_noise
+
     def forward(self, img, camera_angles: torch.Tensor=None, patch_params: torch.Tensor=None, update_emas=False, **block_kwargs):
         _ = update_emas # unused
         batch_size, _, h, w = img.shape
@@ -263,10 +267,10 @@ class Discriminator(torch.nn.Module):
             misc.assert_shape(patch_params_cond, [batch_size, 3])
             patch_scale_embs = self.scalar_enc(patch_params_cond) # [batch_size, fourier_dim]
             # c = c if not self.cfg.hyper_mod else torch.cat([c, patch_scale_embs], dim=1) # [batch_size, c_dim + fourier_dim]
-            c = patch_params_cond
+            c = patch_scale_embs 
 
         if not self.scalar_enc is None:
-            hyper_mod_c = self.hyper_mod_mapping(z=None, c=patch_scale_embs) # [batch_size, 512]
+            hyper_mod_c = self.hyper_mod_mapping(z=None, c=c) # [batch_size, 512]
         else:
             hyper_mod_c = None
 
@@ -278,6 +282,8 @@ class Discriminator(torch.nn.Module):
         if self.c_dim > 0:
             assert c.shape[1] > 0
         if not self.head_mapping is None:
+            if self.disc_c_noise > 0: 
+                camera_angles += torch.randn_like(camera_angles) * camera_angles.std(0) * self.disc_c_noise 
             cmap = self.head_mapping(z=None, c=c, camera_angles=camera_angles) # [TODO]
         else:
             cmap = None

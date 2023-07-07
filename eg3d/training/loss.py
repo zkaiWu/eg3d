@@ -16,7 +16,7 @@ from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
 from torch_utils.ops import upfirdn2d
 from training.dual_discriminator import filtered_resizing
-from training.training_utils import sample_patch_params, linear_schedule
+from training.training_utils import sample_patch_params, linear_schedule, extract_patches
 
 #----------------------------------------------------------------------------
 
@@ -71,6 +71,12 @@ class StyleGAN2Loss(Loss):
         # self.gpc_spoof_p = linear_schedule(cur_kimg, 1.0, self.cfg.model.generator.camera_cond_spoof_p, 1000)
 
 
+    def extract_patches(self, img: torch.Tensor):
+        patch_params = sample_patch_params(len(img), self.patch_cfg, device=img.device)
+        img = extract_patches(img, patch_params, resolution=self.patch_cfg['resolution']) # [batch_size, c, h_patch, w_patch]
+
+        return img, patch_params
+
     def run_G(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
         # figure out the usage of swapping prob 
         if swapping_prob is not None:
@@ -88,14 +94,15 @@ class StyleGAN2Loss(Loss):
 
         patch_params = sample_patch_params(len(z), self.patch_cfg, device=z.device) if self.patch_cfg['enabled'] else None
         gen_output = self.G.synthesis(ws, c, neural_rendering_resolution=neural_rendering_resolution, update_emas=update_emas, patch_params=patch_params)
-        import pdb; pdb.set_trace()
-        return gen_output, ws
+        return gen_output, ws, patch_params
 
-    def run_D(self, img, c, blur_sigma=0, blur_sigma_raw=0, update_emas=False):
+    def run_D(self, img, c, blur_sigma=0, blur_sigma_raw=0, update_emas=False, **kwargs):
+        # check the blur kernal here
         blur_size = np.floor(blur_sigma * 3)
         if blur_size > 0:
             with torch.autograd.profiler.record_function('blur'):
                 f = torch.arange(-blur_size, blur_size + 1, device=img['image'].device).div(blur_sigma).square().neg().exp2()
+                import pdb; pdb.set_trace()
                 img['image'] = upfirdn2d.filter2d(img['image'], f / f.sum())
 
         if self.augment_pipe is not None:
@@ -104,8 +111,13 @@ class StyleGAN2Loss(Loss):
                                                     dim=1))
             img['image'] = augmented_pair[:, :img['image'].shape[1]]
             img['image_raw'] = torch.nn.functional.interpolate(augmented_pair[:, img['image'].shape[1]:], size=img['image_raw'].shape[2:], mode='bilinear', antialias=True)
-
-        logits = self.D(img, c, update_emas=update_emas)
+        
+        # adapt to epigraf_discrimination
+        if self.patch_cfg['enabled']:
+            img = img['image']
+            logits = self.D(img, c, update_emas=update_emas, **kwargs)
+        else:
+            logits = self.D(img, c, update_emas=update_emas)
         return logits
 
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
@@ -139,8 +151,8 @@ class StyleGAN2Loss(Loss):
         # Gmain: Maximize logits for generated images.
         if phase in ['Gmain', 'Gboth']:
             with torch.autograd.profiler.record_function('Gmain_forward'):
-                gen_img, _gen_ws = self.run_G(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=neural_rendering_resolution)
-                gen_logits = self.run_D(gen_img, gen_c, blur_sigma=blur_sigma)
+                gen_img, _gen_ws, patch_params = self.run_G(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=neural_rendering_resolution)
+                gen_logits = self.run_D(gen_img, gen_c, blur_sigma=blur_sigma, patch_params=patch_params)
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
                 loss_Gmain = torch.nn.functional.softplus(-gen_logits)
@@ -264,8 +276,8 @@ class StyleGAN2Loss(Loss):
         loss_Dgen = 0
         if phase in ['Dmain', 'Dboth']:
             with torch.autograd.profiler.record_function('Dgen_forward'):
-                gen_img, _gen_ws = self.run_G(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=neural_rendering_resolution, update_emas=True)
-                gen_logits = self.run_D(gen_img, gen_c, blur_sigma=blur_sigma, update_emas=True)
+                gen_img, _gen_ws, patch_params = self.run_G(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=neural_rendering_resolution, update_emas=True)
+                gen_logits = self.run_D(gen_img, gen_c, blur_sigma=blur_sigma, update_emas=True, patch_params=patch_params)
                 training_stats.report('Loss/scores/fake', gen_logits)
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
                 loss_Dgen = torch.nn.functional.softplus(gen_logits)
@@ -277,11 +289,16 @@ class StyleGAN2Loss(Loss):
         if phase in ['Dmain', 'Dreg', 'Dboth']:
             name = 'Dreal' if phase == 'Dmain' else 'Dr1' if phase == 'Dreg' else 'Dreal_Dr1'
             with torch.autograd.profiler.record_function(name + '_forward'):
-                real_img_tmp_image = real_img['image'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
-                real_img_tmp_image_raw = real_img['image_raw'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
-                real_img_tmp = {'image': real_img_tmp_image, 'image_raw': real_img_tmp_image_raw}
-
-                real_logits = self.run_D(real_img_tmp, real_c, blur_sigma=blur_sigma)
+                if self.patch_cfg['enabled']:
+                    import pdb; pdb.set_trace()
+                    (real_img_patch, patch_params) = self.extract_patches(real_img) if self.patch_cfg['enabled'] else (real_img, None)
+                    real_img_tmp = real_img_patch.detach().requires_grad_(phase in ['Dreg', 'Dall'])
+                    real_logits = self.run_D(real_img_tmp, real_c, blur_sigma=blur_sigma, patch_params=patch_params)
+                else:
+                    real_img_tmp_image = real_img['image'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
+                    real_img_tmp_image_raw = real_img['image_raw'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
+                    real_img_tmp = {'image': real_img_tmp_image, 'image_raw': real_img_tmp_image_raw}
+                    real_logits = self.run_D(real_img_tmp, real_c, blur_sigma=blur_sigma)
                 training_stats.report('Loss/scores/real', real_logits)
                 training_stats.report('Loss/signs/real', real_logits.sign())
 
