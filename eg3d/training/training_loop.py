@@ -180,6 +180,7 @@ def training_loop(
         print('Setting up augmentation...')
     augment_pipe = None
     ada_stats = None
+
     if (augment_kwargs is not None) and (augment_p > 0 or ada_target is not None):
         augment_pipe = dnnlib.util.construct_class_by_name(**augment_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
         augment_pipe.p.copy_(torch.as_tensor(augment_p))
@@ -279,6 +280,7 @@ def training_loop(
 
             # Accumulate gradients.
             phase.opt.zero_grad(set_to_none=True)
+            # only accumulate gradients for the current phase
             phase.module.requires_grad_(True)
             for real_img, real_c, gen_z, gen_c in zip(phase_real_img, phase_real_c, phase_gen_z, phase_gen_c):
                 loss.accumulate_gradients(phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, gain=phase.interval, cur_nimg=cur_nimg)

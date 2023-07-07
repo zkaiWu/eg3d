@@ -3,7 +3,7 @@
 CIDX=$1
 
 CUDA_VISIBLE_DEVICES=$CIDX python gen_samples.py \
-    --outdir=out/sample_direct_training \
+    --outdir=out/sample_direct_training_unseen_poes \
     --trunc=1.0 \
     --shapes=true \
     --seeds=0-3 \

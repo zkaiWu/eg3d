@@ -250,7 +250,6 @@ def generate_images(
                 meta_json.append(meta_data)
                 
 
-        print('aaaaa')
         output_dir = os.path.join(outdir, exp_name, f'seed{seed:04d}')
         os.makedirs(output_dir, exist_ok=True)
         os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
@@ -261,46 +260,45 @@ def generate_images(
         with open(os.path.join(output_dir, 'meta.json'), 'w') as f:
             json.dump(meta_json, f, indent=4)
 
-        # if shapes:
-        #     # extract a shape.mrc with marching cubes. You can view the .mrc file using ChimeraX from UCSF.
-        #     max_batch=1000000
+        if shapes:
+            # extract a shape.mrc with marching cubes. You can view the .mrc file using ChimeraX from UCSF.
+            max_batch=1000000
 
-        #     samples, voxel_origin, voxel_size = create_samples(N=shape_res, voxel_origin=[0, 0, 0], cube_length=G.rendering_kwargs['box_warp'] * 1)#.reshape(1, -1, 3)
-        #     samples = samples.to(z.device)
-        #     sigmas = torch.zeros((samples.shape[0], samples.shape[1], 1), device=z.device)
-        #     transformed_ray_directions_expanded = torch.zeros((samples.shape[0], max_batch, 3), device=z.device)
-        #     transformed_ray_directions_expanded[..., -1] = -1
+            samples, voxel_origin, voxel_size = create_samples(N=shape_res, voxel_origin=[0, 0, 0], cube_length=G.rendering_kwargs['box_warp'] * 1)#.reshape(1, -1, 3)
+            samples = samples.to(z.device)
+            sigmas = torch.zeros((samples.shape[0], samples.shape[1], 1), device=z.device)
+            transformed_ray_directions_expanded = torch.zeros((samples.shape[0], max_batch, 3), device=z.device)
+            transformed_ray_directions_expanded[..., -1] = -1
 
-        #     head = 0
-        #     with tqdm(total = samples.shape[1]) as pbar:
-        #         with torch.no_grad():
-        #             while head < samples.shape[1]:
-        #                 torch.manual_seed(0)
-        #                 sigma = G.sample(samples[:, head:head+max_batch], transformed_ray_directions_expanded[:, :samples.shape[1]-head], z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, noise_mode='const')['sigma']
-        #                 sigmas[:, head:head+max_batch] = sigma
-        #                 head += max_batch
-        #                 pbar.update(max_batch)
+            head = 0
+            with tqdm(total = samples.shape[1]) as pbar:
+                with torch.no_grad():
+                    while head < samples.shape[1]:
+                        torch.manual_seed(0)
+                        sigma = G.sample(samples[:, head:head+max_batch], transformed_ray_directions_expanded[:, :samples.shape[1]-head], z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, noise_mode='const')['sigma']
+                        sigmas[:, head:head+max_batch] = sigma
+                        head += max_batch
+                        pbar.update(max_batch)
 
-        #     sigmas = sigmas.reshape((shape_res, shape_res, shape_res)).cpu().numpy()
-        #     sigmas = np.flip(sigmas, 0)
+            sigmas = sigmas.reshape((shape_res, shape_res, shape_res)).cpu().numpy()
+            sigmas = np.flip(sigmas, 0)
 
-        #     # Trim the border of the extracted cube
-        #     pad = int(30 * shape_res / 256)
-        #     pad_value = -1000
-        #     sigmas[:pad] = pad_value
-        #     sigmas[-pad:] = pad_value
-        #     sigmas[:, :pad] = pad_value
-        #     sigmas[:, -pad:] = pad_value
-        #     sigmas[:, :, :pad] = pad_value
-        #     sigmas[:, :, -pad:] = pad_value
+            # Trim the border of the extracted cube
+            pad = int(30 * shape_res / 256)
+            pad_value = -1000
+            sigmas[:pad] = pad_value
+            sigmas[-pad:] = pad_value
+            sigmas[:, :pad] = pad_value
+            sigmas[:, -pad:] = pad_value
+            sigmas[:, :, :pad] = pad_value
+            sigmas[:, :, -pad:] = pad_value
 
-        #     if shape_format == '.ply':
-        #         from shape_utils import convert_sdf_samples_to_ply
-        #         convert_sdf_samples_to_ply(np.transpose(sigmas, (2, 1, 0)), [0, 0, 0], 1, os.path.join(outdir, f'seed{seed:04d}.ply'), level=10)
-        #     elif shape_format == '.mrc': # output mrc
-        #         with mrcfile.new_mmap(os.path.join(outdir, f'seed{seed:04d}.mrc'), overwrite=True, shape=sigmas.shape, mrc_mode=2) as mrc:
-        #             mrc.data[:] = sigmas
-
+            if shape_format == '.ply':
+                from shape_utils import convert_sdf_samples_to_ply
+                convert_sdf_samples_to_ply(np.transpose(sigmas, (2, 1, 0)), [0, 0, 0], 1, os.path.join(outdir, f'seed{seed:04d}.ply'), level=10)
+            elif shape_format == '.mrc': # output mrc
+                with mrcfile.new_mmap(os.path.join(outdir, exp_name, f'seed{seed:04d}', f'seed{seed:04d}.mrc'), overwrite=True, shape=sigmas.shape, mrc_mode=2) as mrc:
+                    mrc.data[:] = sigmas
 
 #----------------------------------------------------------------------------
 
