@@ -5,7 +5,7 @@ from torch_utils import misc
 from torch_utils import persistence
 from torch_utils.ops import upfirdn2d
 
-from eg3d.training.epigraf_layers import (
+from training.epigraf_layers import (
     FullyConnectedLayer,
     MappingNetwork,
     Conv2dLayer,
