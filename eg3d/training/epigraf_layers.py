@@ -90,6 +90,9 @@ class MappingNetwork(torch.nn.Module):
             assert self.camera_scalar_enc.get_dim() > 0
         else:
             self.camera_scalar_enc = None
+        
+        # if camera_cond:
+        #     c_dim = c_dim + 
 
         self.z_dim = z_dim
         self.c_dim = c_dim
@@ -97,6 +100,7 @@ class MappingNetwork(torch.nn.Module):
         self.num_ws = num_ws
         self.num_layers = num_layers
         self.w_avg_beta = w_avg_beta
+        self.camera_cond = camera_cond
         self.camera_cond_drop_p = camera_cond_drop_p
         self.camera_cond_noise_std = camera_cond_noise_std
 
@@ -106,10 +110,13 @@ class MappingNetwork(torch.nn.Module):
             embed_features = 0
         if layer_features is None:
             layer_features = w_dim
-        features_list = [z_dim + embed_features] + [layer_features] * (num_layers - 1) + [w_dim]
+        features_list = [z_dim + embed_features + embed_features] + [layer_features] * (num_layers - 1) + [w_dim]       # another embed_features for camera angles
 
         if self.c_dim > 0:
             self.embed = FullyConnectedLayer(self.c_dim, embed_features)
+
+        if self.camera_cond:
+            self.camera_embed = FullyConnectedLayer(25, embed_features)         # camera angles for 25 scalars
         
         for idx in range(num_layers):
             in_features = features_list[idx]
@@ -131,20 +138,20 @@ class MappingNetwork(torch.nn.Module):
         if (not self.camera_scalar_enc is None) and (not self.training) and (camera_angles is None):
             camera_angles = self.mean_camera_pose.unsqueeze(0).repeat(len(z), 1) # [batch_size, 25]
 
-        # when camera_cond is False, we do not use
-        if not self.camera_scalar_enc is None:
-            # Using only yaw and pitch for conditioning (roll is always zero)
-            camera_angles = camera_angles[:, [0, 1]] # [batch_size, 2]
-            if self.training and self.camera_cond_noise_std > 0:
-                camera_angles = camera_angles + self.camera_cond_noise_std * torch.randn_like(camera_angles) * camera_angles.std(dim=0, keepdim=True) # [batch_size, 2]
-            # NOTE: we use camera extrinsics and intrinsics as input
-            # camera_angles = camera_angles.sign() * ((camera_angles.abs() % (2.0 * np.pi)) / (2.0 * np.pi)) # [batch_size, 2]
-            camera_angles_embs = self.camera_scalar_enc(camera_angles) # [batch_size, fourier_dim]
-            camera_angles_embs = F.dropout(camera_angles_embs, p=self.camera_cond_drop_p, training=self.training) # [batch_size, fourier_dim]
-            c = torch.zeros(len(camera_angles_embs), 0, device=camera_angles_embs.device) if c is None else c # [batch_size, c_dim]
-            c = torch.cat([c, camera_angles_embs], dim=1) # [batch_size, c_dim + angle_emb_dim]
+        # when camera_cond is False, we do not use camera angle as condition
+        # if not self.camera_scalar_enc is None:
+        #     # Using only yaw and pitch for conditioning (roll is always zero)
+        #     camera_angles = camera_angles[:, [0, 1]] # [batch_size, 2]
+        #     if self.training and self.camera_cond_noise_std > 0:
+        #         camera_angles = camera_angles + self.camera_cond_noise_std * torch.randn_like(camera_angles) * camera_angles.std(dim=0, keepdim=True) # [batch_size, 2]
+        #     # NOTE: we use camera extrinsics and intrinsics as input
+        #     # camera_angles = camera_angles.sign() * ((camera_angles.abs() % (2.0 * np.pi)) / (2.0 * np.pi)) # [batch_size, 2]
+        #     camera_angles_embs = self.camera_scalar_enc(camera_angles) # [batch_size, fourier_dim]
+        #     camera_angles_embs = F.dropout(camera_angles_embs, p=self.camera_cond_drop_p, training=self.training) # [batch_size, fourier_dim]
+        #     c = torch.zeros(len(camera_angles_embs), 0, device=camera_angles_embs.device) if c is None else c # [batch_size, c_dim]
+        #     c = torch.cat([c, camera_angles_embs], dim=1) # [batch_size, c_dim + angle_emb_dim]
 
-        # Embed, normalize, and concat inputs.
+        # Embed, normalize, and concat inputs. with condition 
         x = None
         with torch.autograd.profiler.record_function('input'):
             if self.z_dim > 0:
@@ -154,6 +161,10 @@ class MappingNetwork(torch.nn.Module):
                 misc.assert_shape(c, [None, self.c_dim])
                 y = normalize_2nd_moment(self.embed(c.to(torch.float32)))
                 x = torch.cat([x, y], dim=1) if x is not None else y
+            if self.camera_cond:
+                misc.assert_shape(camera_angles, [None, 25])
+                camera_embeds = normalize_2nd_moment(self.camera_embed(camera_angles.to(torch.float32)))
+                x = torch.cat([x, camera_embeds], dim=1) if x is not None else camera_embeds
 
         # Main layers.
         for idx in range(self.num_layers):
