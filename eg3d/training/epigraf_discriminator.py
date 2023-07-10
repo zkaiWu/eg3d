@@ -230,7 +230,7 @@ class Discriminator(torch.nn.Module):
 
         common_kwargs = dict(img_channels=self.img_channels, conv_clamp=conv_clamp)
         # total_conditioning_dim = c_dim + (0 if (self.scalar_enc is None or not self.cfg.hyper_mod) else self.scalar_enc.get_dim())
-        total_conditioning_dim = c_dim + self.scalar_enc.get_dim()
+        total_conditioning_dim = self.scalar_enc.get_dim()
         cur_layer_idx = 0
 
         for i, res in enumerate(self.block_resolutions):
@@ -247,8 +247,11 @@ class Discriminator(torch.nn.Module):
 
         if self.c_dim > 0 or not self.scalar_enc is None:
             self.head_mapping = MappingNetwork(
-                z_dim=0, c_dim=total_conditioning_dim, camera_cond=False, camera_cond_drop_p=0.0,
+                z_dim=0, c_dim=total_conditioning_dim, camera_cond=True, camera_cond_drop_p=0.0,
                 camera_cond_noise_std=0.0, camera_raw_scalars=False, w_dim=cmap_dim, num_ws=None, w_avg_beta=None, **mapping_kwargs)
+            # self.head_mapping = MappingNetwork(
+            #     z_dim=0, c_dim=total_conditioning_dim, camera_cond=True, w_dim=cmap_dim, num_ws=None, w_avg_beta=None, **mapping_kwargs
+            # )
         else:
             self.head_mapping = None
         self.b4 = DiscriminatorEpilogue(

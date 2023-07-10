@@ -26,6 +26,7 @@ def extract_patches(x: torch.Tensor, patch_params: Dict, resolution: int) -> tor
     """
     _, _, h, w = x.shape
     assert h == w, "Can only work on square images (for now)"
+    import pdb; pdb.set_trace()
     coords = compute_patch_coords(patch_params, resolution) # [batch_size, resolution, resolution, 2]
     out = F.grid_sample(x, coords, mode='bilinear', align_corners=True) # [batch_size, c, resolution, resolution]
     return out
