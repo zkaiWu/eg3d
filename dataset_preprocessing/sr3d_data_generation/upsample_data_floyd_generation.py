@@ -102,6 +102,7 @@ def image_sr(rank, world_size, args):
         # test_dataloader,
         # val_dataloader,
     ]
+    print(len(train_dataset))
 
 
     for dataloader in dataloader_list:
@@ -181,7 +182,7 @@ def main(args):
     world_size = args.world_size
     print(world_size)
     copy_json(args)
-    # mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
+    mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
 
 
 """
