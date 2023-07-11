@@ -39,7 +39,6 @@ class eg3dDataset(Dataset):
             image_paths = glob.glob(os.path.join(self.input_dir, obj_name, 'images', '*.png'))
             image_paths.sort()
             for i, img_p in enumerate(image_paths):
-
                 data_dict = {
                     'image_path': img_p, 
                     'obj_name': obj_name,
@@ -109,7 +108,6 @@ def image_sr(rank, world_size, args):
         for data in dataloader:
             image = data['image']
             image_path = data['image_path']
-            obj_name = data['obj_name']
             prompt_embeds_batch = prompt_embeds.repeat(len(image), 1, 1)
             negative_embeds_batch = negative_embeds.repeat(len(image), 1, 1)
             for per_view_idx in range(args.image_per_view):
@@ -119,9 +117,9 @@ def image_sr(rank, world_size, args):
                 ).images
                 for i in range(upscaled_image.shape[0]):
                     single_upscaled_image = pt_to_pil(upscaled_image)[i]
-                    save_dir = os.path.join(output_dir, obj_name[i], f'images_{args.output_suffix}', f'{os.path.basename(image_path[i]).rstrip(".png")}')
-                    os.makedirs(save_dir, exist_ok=True)
-                    single_upscaled_image.save(os.path.join(save_dir, f'{per_view_idx}.png'))
+                    os.makedirs(output_dir, exist_ok=True)
+                    single_upscaled_image.save(os.path.join(output_dir, f'{os.path.basename(image_path[i]).rstrip(".png")}_{per_view_idx}.png'))
+
 
 
 def copy_json(args):
@@ -136,20 +134,36 @@ def copy_json(args):
             continue
 
         for sub_name in os.listdir(obj_dir):
-            sub_name = os.path.join(obj_dir, sub_name)
+            print(obj_dir)
+            print(sub_name)
 
-            if sub_name.endswith('.json'):
-                json_path = sub_name
-                os.makedirs(os.path.join(output_dir, output_obj_name), exist_ok=True)
-                shutil.copy(json_path, os.path.join(output_dir, output_obj_name, f'meta_{args.output_suffix}.json'))
+            if sub_name == 'meta.json':
+                json_output_dict = {
+                    "labels": {}
+                }
 
+                json_path = os.path.join(obj_dir, sub_name)
+                with open(json_path, 'r') as f:
+                    meta_data = json.load(f)
+                
+                for i, meta in enumerate(meta_data):
+                    camera_params = meta['camera_params']
+                    for per_view_idx in range(args.image_per_view):
+                        # json_output_dict['labels'].append({f"{i}_{per_view_idx}.png": camera_params[0]})
+                        json_output_dict['labels'][f"{i}_{per_view_idx}.png"] = camera_params[0]
+
+                json_output_dict['cam_pivot'] = meta_data[0]['cam_pivot']
+                json_output_dict['cam_radius'] = meta_data[0]['cam_radius']
+
+                os.makedirs(output_dir, exist_ok=True)
+                with open(os.path.join(output_dir, 'dataset.json'), 'w') as f:
+                    json.dump(json_output_dict, f, indent=4)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Blender 64x64 to 256x256 using floyd')
     parser.add_argument('--input_dir', required=True, type=str, help='input image directory')
     parser.add_argument('--output_dir', required=True, type=str, help='output image directory')
-    parser.add_argument('--output_suffix', required=True, type=str, help='output suffix')
     parser.add_argument('--guidance_scale', default=0.0, type=float, help='guidance scale for floyd')
     parser.add_argument('--noise_level', default=0, type=int, help='noise level for floyd')
     parser.add_argument('--num_inference_steps', default=50, type=int, help='num inference steps for floyd')
@@ -157,6 +171,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=8, help='batch size')
     parser.add_argument('--world_size', type=int, default=4, help='world size use in ddp')
     parser.add_argument('--port', type=int, default=5678, help='world size use in ddp')
+    parser.add_argument('--prompt', type=str, default="", help='prompt for floyd sr model')
 
     args = parser.parse_args()
     return args
@@ -165,9 +180,13 @@ def parse_args():
 def main(args):
     world_size = args.world_size
     print(world_size)
-    # copy_json(args)
-    mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
+    copy_json(args)
+    # mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
 
+
+"""
+CUDA_VISIBLE_DEVICES=0,2,3 python dataset_preprocessing/sr3d_data_generation/upsample_data_floyd_generation.py --input_dir /data5/wuzhongkai/data/dreamfusion_data/eg3d_generation_data/seed0001 --output_dir /data5/wuzhongkai/data/dreamfusion_data/eg3d_fake/eg3d_generation_data_ffhqformat --guidance_scale 0.0 --noise_level 0 --num_inference_steps 50 --image_per_view 50 --batch_size 8 --world_size 4 --port 5678
+"""
 
 if __name__ == '__main__':
     

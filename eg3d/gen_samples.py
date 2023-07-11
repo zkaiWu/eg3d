@@ -165,7 +165,8 @@ def generate_images(
         angle_p = -0.2
         for angle_y, angle_p in [(.4, angle_p), (0, angle_p), (-.4, angle_p)]:
             cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device)
-            cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
+            # cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
+            cam_radius = 2.5
             cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=device)
             conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
             camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
