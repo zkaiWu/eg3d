@@ -79,6 +79,7 @@ class StyleGAN2Loss(Loss):
         img['image'] = extract_patches(img['image'], patch_params, resolution=int(img_resolution * self.patch_cfg['min_scale'])) # [batch_size, c, h_patch, w_patch]
         return img, patch_params
 
+
     def run_G(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
         # figure out the usage of swapping prob 
         if swapping_prob is not None:
@@ -131,8 +132,9 @@ class StyleGAN2Loss(Loss):
         r1_gamma = self.r1_gamma
 
         alpha = min(cur_nimg / (self.gpc_reg_fade_kimg * 1e3), 1) if self.gpc_reg_fade_kimg > 0 else 1
-        swapping_prob = (1 - alpha) * 1 + alpha * self.gpc_reg_prob if self.gpc_reg_prob is not None else None
+        swapping_prob = (1 - alpha) * 1 + alpha * self.gpc_reg_prob if self.gpc_reg_prob is not None else None         
 
+        # anneal increase the neural rendering resolution
         if self.neural_rendering_resolution_final is not None:
             alpha = min(cur_nimg / (self.neural_rendering_resolution_fade_kimg * 1e3), 1)
             neural_rendering_resolution = int(np.rint(self.neural_rendering_resolution_initial * (1 - alpha) + self.neural_rendering_resolution_final * alpha))
