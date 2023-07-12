@@ -95,11 +95,12 @@ def image_sr(rank, world_size, args):
         prompt = args.prompt
         prompt_embeds, negative_embeds = stage_1.encode_prompt(prompt) 
         print("prompt : {}".format(prompt))
-        del stage_1
     elif args.prompt_mode == 'file':
         prompt_list = read_prompt_from_file(args.prompt_file_path)
         prompt_embeds, negative_embeds = stage_1.encode_prompt(prompt_list)
         print(f"prompt list : {prompt_list}")
+
+    del stage_1
 
     input_dir = args.input_dir 
     output_dir = args.output_dir
