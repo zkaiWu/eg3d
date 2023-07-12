@@ -19,6 +19,7 @@ import uuid
 import numpy as np
 import torch
 import dnnlib
+from tqdm import tqdm
 
 #----------------------------------------------------------------------------
 
@@ -265,7 +266,7 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
     # Main loop.
     while not stats.is_full():
         images = []
-        for _i in range(batch_size // batch_gen):
+        for _i in tqdm(range(batch_size // batch_gen)):
             z = torch.randn([batch_gen, G.z_dim], device=opts.device)
             img = G(z=z, c=next(c_iter), **opts.G_kwargs)['image']
             img = (img * 127.5 + 128).clamp(0, 255).to(torch.uint8)
