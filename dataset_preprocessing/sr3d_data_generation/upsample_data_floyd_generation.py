@@ -67,9 +67,9 @@ class eg3dDataset(Dataset):
 def read_prompt_from_file(file_path):
     prompt_list = []
     with open(file_path, 'r') as f:
-        prompt_line = f.readline()
-        prompt_line = prompt_line.lstrip().rstrip()
-        prompt_list.append(prompt_line)
+        for prompt_line in f.readlines():   
+            prompt_line = prompt_line.lstrip().rstrip()
+            prompt_list.append(prompt_line)
 
     return prompt_list
 
@@ -99,6 +99,7 @@ def image_sr(rank, world_size, args):
         prompt_list = read_prompt_from_file(args.prompt_file_path)
         prompt_embeds, negative_embeds = stage_1.encode_prompt(prompt_list)
         print(f"prompt list : {prompt_list}")
+        print(f"prompt_embed.shape {prompt_embeds.shape}")
 
     del stage_1
 
@@ -124,9 +125,13 @@ def image_sr(rank, world_size, args):
         for data in dataloader:
             image = data['image']
             image_path = data['image_path']
-            prompt_embeds_batch = prompt_embeds.repeat(len(image), 1, 1)
-            negative_embeds_batch = negative_embeds.repeat(len(image), 1, 1)
+            if args.prompt_mode == 'single':
+                prompt_embeds_batch = prompt_embeds.repeat(len(image), 1, 1)
+                negative_embeds_batch = negative_embeds.repeat(len(image), 1, 1)
             for per_view_idx in range(args.image_per_view):
+                if args.prompt_mode == 'file':
+                    prompt_embeds_batch = prompt_embeds[per_view_idx : per_view_idx + 1].repeat(len(image), 1, 1)
+                    negative_embeds_batch = negative_embeds[per_view_idx : per_view_idx + 1].repeat(len(image), 1, 1)
                 upscaled_image = stage_2(
                     image=image, prompt_embeds=prompt_embeds_batch, negative_prompt_embeds=negative_embeds_batch,  output_type="pt",
                     guidance_scale=args.guidance_scale, noise_level=args.noise_level, num_inference_steps=args.num_inference_steps
