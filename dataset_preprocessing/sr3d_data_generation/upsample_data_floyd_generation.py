@@ -64,6 +64,16 @@ class eg3dDataset(Dataset):
         
 
 
+def read_prompt_from_file(file_path):
+    prompt_list = []
+    with open(file_path, 'r') as f:
+        prompt_line = f.readline()
+        prompt_line = prompt_line.lstrip().rstrip()
+        prompt_list.append(prompt_line)
+
+    return prompt_list
+
+
 def image_sr(rank, world_size, args):
 
     print(f"rank is {rank}")
@@ -76,15 +86,20 @@ def image_sr(rank, world_size, args):
     # tokenizer = DiffusionPipeline.from_pretrained(stage_1_id, subfolder='tokenizer', cache_dir='/data5/wuzhongkai/diffusers_models', torch_dtype=torch.float16, local_files_only=True)
     # encoder = DiffusionPipeline.from_pretrained(stage_1_id, subfolder='text_encoder', cache_dir='/data5/wuzhongkai/diffusers_models', torch_dtype=torch.float16, local_files_only=True)
     # stage_1 = IFPipeline(tokenizer=tokenizer, text_encoder=encoder).to(rank)
-    stage_1 = IFPipeline.from_pretrained(stage_1_id, variant="fp16", torch_dtype=torch.float16, cache_dir='/data5/wuzhongkai/diffusers_models', local_files_only=True).to(rank)
+    stage_1 = IFPipeline.from_pretrained(stage_1_id, variant="fp16", torch_dtype=torch.float16).to(rank)
     stage_1.enable_model_cpu_offload(gpu_id=rank)
-    stage_2 = DiffusionPipeline.from_pretrained(stage_2_id, text_encoder=None, variant="fp16", torch_dtype=torch.float16, cache_dir='/data5/wuzhongkai/diffusers_models', local_files_only=True).to(rank)
+    stage_2 = DiffusionPipeline.from_pretrained(stage_2_id, text_encoder=None, variant="fp16", torch_dtype=torch.float16).to(rank)
     stage_2.enable_model_cpu_offload(gpu_id=rank)
 
-    prompt = ""
-    prompt_embeds, negative_embeds = stage_1.encode_prompt(prompt) 
-    del stage_1
-    
+    if args.prompt_mode == 'single':
+        prompt = args.prompt
+        prompt_embeds, negative_embeds = stage_1.encode_prompt(prompt) 
+        print("prompt : {}".format(prompt))
+        del stage_1
+    elif args.prompt_mode == 'file':
+        prompt_list = read_prompt_from_file(args.prompt_file_path)
+        prompt_embeds, negative_embeds = stage_1.encode_prompt(prompt_list)
+        print(f"prompt list : {prompt_list}")
 
     input_dir = args.input_dir 
     output_dir = args.output_dir
@@ -103,7 +118,7 @@ def image_sr(rank, world_size, args):
         # val_dataloader,
     ]
 
-
+    print(len(train_dataset))
     for dataloader in dataloader_list:
         for data in dataloader:
             image = data['image']
@@ -171,7 +186,9 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=8, help='batch size')
     parser.add_argument('--world_size', type=int, default=4, help='world size use in ddp')
     parser.add_argument('--port', type=int, default=5678, help='world size use in ddp')
+    parser.add_argument('--prompt_mode', type=str, default="single", choices=['file', 'single'], help="in which mode to get prompt, choise from 'file' or 'single'")
     parser.add_argument('--prompt', type=str, default="", help='prompt for floyd sr model')
+    parser.add_argument('--prompt_file_path', type=str, help='when using prompt_mode, specify a txt file to read the prompt list')
 
     args = parser.parse_args()
     return args
@@ -181,7 +198,7 @@ def main(args):
     world_size = args.world_size
     print(world_size)
     copy_json(args)
-    # mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
+    mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
 
 
 """
