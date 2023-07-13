@@ -50,6 +50,8 @@ class StyleGAN2Loss(Loss):
         self.gpc_reg_fade_kimg = gpc_reg_fade_kimg
         self.gpc_reg_prob = gpc_reg_prob
         self.dual_discrimination = dual_discrimination
+        if patch_cfg['enabled']:
+            self.dual_discrimination = False
         self.filter_mode = filter_mode
         self.resample_filter = upfirdn2d.setup_filter([1,3,3,1], device=device)
         self.blur_raw_target = True
@@ -72,15 +74,15 @@ class StyleGAN2Loss(Loss):
 
 
     def extract_patches(self, img: torch.Tensor):
-        patch_params = sample_patch_params(len(img), self.patch_cfg, device=img.device)
-        img = extract_patches(img, patch_params, resolution=self.patch_cfg['resolution']) # [batch_size, c, h_patch, w_patch]
-
+        patch_params = sample_patch_params(len(img['image']), self.patch_cfg, device=img['image'].device)
+        img_resolution = img['image'].shape[-1]
+        img['image'] = extract_patches(img['image'], patch_params, resolution=int(img_resolution * self.patch_cfg['min_scale'])) # [batch_size, c, h_patch, w_patch]
         return img, patch_params
+
 
     def run_G(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
         # figure out the usage of swapping prob 
         if swapping_prob is not None:
-            # roll along the batch dimension
             c_swapped = torch.roll(c.clone(), 1, 0)
             c_gen_conditioning = torch.where(torch.rand((c.shape[0], 1), device=c.device) < swapping_prob, c_swapped, c)
         else:
@@ -105,7 +107,6 @@ class StyleGAN2Loss(Loss):
                 f = torch.arange(-blur_size, blur_size + 1, device=img['image'].device).div(blur_sigma).square().neg().exp2()
                 img['image'] = upfirdn2d.filter2d(img['image'], f / f.sum())
 
-        # only use augment_pipe in discriminator, but always disabled for ed3g
         if self.augment_pipe is not None:
             augmented_pair = self.augment_pipe(torch.cat([img['image'],
                                                     torch.nn.functional.interpolate(img['image_raw'], size=img['image'].shape[2:], mode='bilinear', antialias=True)],
@@ -131,8 +132,9 @@ class StyleGAN2Loss(Loss):
         r1_gamma = self.r1_gamma
 
         alpha = min(cur_nimg / (self.gpc_reg_fade_kimg * 1e3), 1) if self.gpc_reg_fade_kimg > 0 else 1
-        swapping_prob = (1 - alpha) * 1 + alpha * self.gpc_reg_prob if self.gpc_reg_prob is not None else None
+        swapping_prob = (1 - alpha) * 1 + alpha * self.gpc_reg_prob if self.gpc_reg_prob is not None else None         
 
+        # anneal increase the neural rendering resolution
         if self.neural_rendering_resolution_final is not None:
             alpha = min(cur_nimg / (self.neural_rendering_resolution_fade_kimg * 1e3), 1)
             neural_rendering_resolution = int(np.rint(self.neural_rendering_resolution_initial * (1 - alpha) + self.neural_rendering_resolution_final * alpha))
@@ -218,7 +220,7 @@ class StyleGAN2Loss(Loss):
                 with torch.autograd.profiler.record_function('style_mixing'):
                     cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
                     cutoff = torch.where(torch.rand([], device=ws.device) < self.style_mixing_prob, cutoff, torch.full_like(cutoff, ws.shape[1]))
-                    ws[:, cutoff:] = self.G.mapping(torch.randn_like(z), c, update_emas=False)[:, cutoff:]
+                    ws[:, cutoff:] = self.G.mapping(torch.randn_like(gen_z), c_gen_conditioning, update_emas=False)[:, cutoff:]
             initial_coordinates = torch.rand((ws.shape[0], 1000, 3), device=ws.device) * 2 - 1
             perturbed_coordinates = initial_coordinates + torch.randn_like(initial_coordinates) * (1/256) * self.G.rendering_kwargs['box_warp']
             all_coordinates = torch.cat([initial_coordinates, perturbed_coordinates], dim=1)
@@ -292,7 +294,9 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function(name + '_forward'):
                 if self.patch_cfg['enabled']:
                     (real_img_patch, patch_params) = self.extract_patches(real_img) if self.patch_cfg['enabled'] else (real_img, None)
-                    real_img_tmp = real_img_patch.detach().requires_grad_(phase in ['Dreg', 'Dall'])
+                    real_img_tmp_image = real_img_patch['image'].detach().requires_grad_(phase in ['Dreg', 'Dall'])
+                    real_img_tmp_image_raw = real_img['image_raw'].detach().requires_grad_(phase in ['Dreg', 'Dall'])
+                    real_img_tmp = {'image': real_img_tmp_image, 'image_raw': real_img_tmp_image_raw}
                     real_logits = self.run_D(real_img_tmp, real_c, blur_sigma=blur_sigma, patch_params=patch_params)
                 else:
                     real_img_tmp_image = real_img['image'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
