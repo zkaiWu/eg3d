@@ -80,6 +80,7 @@ class StyleGAN2Loss(Loss):
     def run_G(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
         # figure out the usage of swapping prob 
         if swapping_prob is not None:
+            # roll along the batch dimension
             c_swapped = torch.roll(c.clone(), 1, 0)
             c_gen_conditioning = torch.where(torch.rand((c.shape[0], 1), device=c.device) < swapping_prob, c_swapped, c)
         else:
@@ -105,6 +106,7 @@ class StyleGAN2Loss(Loss):
                 import pdb; pdb.set_trace()
                 img['image'] = upfirdn2d.filter2d(img['image'], f / f.sum())
 
+        # only use augment_pipe in discriminator, but always disabled for ed3g
         if self.augment_pipe is not None:
             augmented_pair = self.augment_pipe(torch.cat([img['image'],
                                                     torch.nn.functional.interpolate(img['image_raw'], size=img['image'].shape[2:], mode='bilinear', antialias=True)],
