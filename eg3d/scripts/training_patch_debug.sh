@@ -11,4 +11,6 @@ CUDA_VISIBLE_DEVICES=$CIDX python train.py \
     --gpus=$GPU_NUM \
     --batch=$BATCH_SIZE \
     --gamma=1 \
-    --gen_pose_cond=True
+    --gen_pose_cond=True \
+    --metrics fid2k_full_for_patch_rendering \
+    --mbstd-group 2 \

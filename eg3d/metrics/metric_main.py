@@ -91,6 +91,13 @@ def fid50k_full(opts):
     return dict(fid50k_full=fid)
 
 @register_metric
+def fid2k_full_for_patch_rendering(opts):
+    opts.dataset_kwargs.update(max_size=None, xflip=False)
+    opts.G_kwargs.update(neural_rendering_resolution=opts.dataset_kwargs['resolution']) 
+    fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=2000)
+    return dict(fid50k_full=fid)
+
+@register_metric
 def kid50k_full(opts):
     opts.dataset_kwargs.update(max_size=None, xflip=False)
     kid = kernel_inception_distance.compute_kid(opts, max_real=1000000, num_gen=50000, num_subsets=100, max_subset_size=1000)
