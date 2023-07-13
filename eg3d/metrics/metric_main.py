@@ -94,8 +94,9 @@ def fid50k_full(opts):
 def fid2k_full_for_patch_rendering(opts):
     opts.dataset_kwargs.update(max_size=None, xflip=False)
     opts.G_kwargs.update(neural_rendering_resolution=opts.dataset_kwargs['resolution']) 
+    print('start to compute fid')
     fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=2000)
-    return dict(fid50k_full=fid)
+    return dict(fid2k_full_for_patch_rendering=fid)
 
 @register_metric
 def kid50k_full(opts):
