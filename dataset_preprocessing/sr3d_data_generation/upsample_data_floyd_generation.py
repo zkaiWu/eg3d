@@ -147,6 +147,7 @@ def copy_json(args):
 
     input_dir = args.input_dir 
     output_dir = args.output_dir
+    import pdb; pdb.set_trace()
 
     for obj_name in os.listdir(input_dir):
         output_obj_name = obj_name 
@@ -204,7 +205,7 @@ def main(args):
     world_size = args.world_size
     print(world_size)
     copy_json(args)
-    mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
+    # mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
 
 
 """
