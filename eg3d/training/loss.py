@@ -103,7 +103,6 @@ class StyleGAN2Loss(Loss):
         if blur_size > 0:
             with torch.autograd.profiler.record_function('blur'):
                 f = torch.arange(-blur_size, blur_size + 1, device=img['image'].device).div(blur_sigma).square().neg().exp2()
-                import pdb; pdb.set_trace()
                 img['image'] = upfirdn2d.filter2d(img['image'], f / f.sum())
 
         # only use augment_pipe in discriminator, but always disabled for ed3g
@@ -292,7 +291,6 @@ class StyleGAN2Loss(Loss):
             name = 'Dreal' if phase == 'Dmain' else 'Dr1' if phase == 'Dreg' else 'Dreal_Dr1'
             with torch.autograd.profiler.record_function(name + '_forward'):
                 if self.patch_cfg['enabled']:
-                    import pdb; pdb.set_trace()
                     (real_img_patch, patch_params) = self.extract_patches(real_img) if self.patch_cfg['enabled'] else (real_img, None)
                     real_img_tmp = real_img_patch.detach().requires_grad_(phase in ['Dreg', 'Dall'])
                     real_logits = self.run_D(real_img_tmp, real_c, blur_sigma=blur_sigma, patch_params=patch_params)
