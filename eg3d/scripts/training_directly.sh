@@ -9,8 +9,9 @@ CUDA_VISIBLE_DEVICES=$CIDX python train.py \
     --outdir=$OUTDIR \
     --cfg=ffhq \
     --data=/data5/wuzhongkai/data/dreamfusion_data/eg3d_fake/eg3d_generation_data_noise300 \
+    --data=/home2/zhongkaiwu/data/dreamfusion_data/eg3d_fake/eg3d_generation_data_noise500 \
     --gpus=$GPU_NUM \
     --batch=$BATCH_SIZE \
     --gamma=1 \
     --gen_pose_cond=True \
-    --kimg 7000 \
+    --kimg 10000 \
