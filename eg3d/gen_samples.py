@@ -172,7 +172,12 @@ def generate_images(
             conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
 
             ws = G.mapping(z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
-            img = G.synthesis(ws, camera_params)['image']
+            # NOTE: add patch_param for debug
+            patch_params = {
+                "scales" : torch.tensor([[0.5, 0.5]]).to(device),
+                "offsets" : torch.tensor([[0.5, 0.0]]).to(device),
+            }
+            img = G.synthesis(ws, camera_params, neural_rendering_resolution=256, patch_params=patch_params)['image']
 
             img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
             imgs.append(img)
