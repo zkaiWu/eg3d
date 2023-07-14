@@ -142,6 +142,7 @@ def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind=
                                                                     3.14/2,
                                                                     camera_lookat_point,
                                                                     radius=G.rendering_kwargs['avg_camera_radius'], device=device).reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+                    
                     w_c = G.mapping(z=zs[0:1], c=c[0:1], truncation_psi=psi, truncation_cutoff=truncation_cutoff)
                     img = G.synthesis(ws=w_c, c=c_forward, noise_mode='const')[image_mode][0]
                 elif entangle == 'camera':
@@ -255,7 +256,6 @@ def parse_tuple(s: Union[str, Tuple[int,int]]) -> Tuple[int, int]:
 @click.option('--nrr', type=int, help='Neural rendering resolution override', default=None, show_default=True)
 @click.option('--shapes', type=bool, help='Gen shapes for shape interpolation', default=False, show_default=True)
 @click.option('--interpolate', type=bool, help='Interpolate between seeds', default=True, show_default=True)
-
 def generate_images(
     network_pkl: str,
     seeds: List[int],
