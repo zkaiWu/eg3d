@@ -351,7 +351,7 @@ def main(**kwargs):
         c.G_reg_interval = opts.density_reg_every
     c.G_kwargs.rendering_kwargs = rendering_options
     c.G_kwargs.num_fp16_res = 0
-    c.loss_kwargs.blur_init_sigma = 10 # Blur the images seen by the discriminator.
+    c.loss_kwargs.blur_init_sigma = 10 # Blur the images seen by the discriminator. # NOTE: the same as epigraf
     c.loss_kwargs.blur_fade_kimg = c.batch_size * opts.blur_fade_kimg / 32 # Fade out the blur during the first N kimg.
 
     c.loss_kwargs.gpc_reg_prob = opts.gpc_reg_prob if opts.gen_pose_cond else None

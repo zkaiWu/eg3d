@@ -96,6 +96,12 @@ class StyleGAN2Loss(Loss):
                 ws[:, cutoff:] = self.G.mapping(torch.randn_like(z), c, update_emas=False)[:, cutoff:]
 
         patch_params = sample_patch_params(len(z), self.patch_cfg, device=z.device) if self.patch_cfg['enabled'] else None
+
+        # NOTE: fake patch_params for debugging
+        patch_params['scales'].fill_(1.0)
+        patch_params['offsets'].fill_(0.0)
+        assert torch.all(patch_params['scales'] == 1.0) and torch.all(patch_params['offsets'] == 0.0), \
+            f'we using fix params for debug. expect scales 1.0 offsets 0.0 but expect scales {patch_params["scales"]} offsets {patch_params["offsets"]}'
         gen_output = self.G.synthesis(ws, c, neural_rendering_resolution=neural_rendering_resolution, update_emas=update_emas, patch_params=patch_params)
         return gen_output, ws, patch_params
 
@@ -207,7 +213,6 @@ class StyleGAN2Loss(Loss):
 
             monotonic_loss = torch.relu(sigma_initial.detach() - sigma_perturbed).mean() * 10
             monotonic_loss.mul(gain).backward()
-
 
             if swapping_prob is not None:
                 c_swapped = torch.roll(gen_c.clone(), 1, 0)
