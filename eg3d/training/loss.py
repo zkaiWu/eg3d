@@ -75,7 +75,7 @@ class StyleGAN2Loss(Loss):
 
     def extract_patches(self, img: torch.Tensor):
         patch_params = sample_patch_params(len(img['image']), self.patch_cfg, device=img['image'].device)
-        # NOTE: fix patch_params in D
+        # NOTE: fake patch_params in D for debugging
         patch_params['scales'].fill_(1.0)
         patch_params['offsets'].fill_(0.0)
         assert torch.all(patch_params['scales'] == 1.0) and torch.all(patch_params['offsets'] == 0.0), \
