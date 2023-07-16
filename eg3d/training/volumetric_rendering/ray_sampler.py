@@ -53,6 +53,8 @@ class RaySampler(torch.nn.Module):
             # Then, multiply by the patch size
             x_cam = x_cam * patch_scales[:, 0].view(N, 1) + patch_offsets[:, 0].view(N, 1)
             y_cam = y_cam * patch_scales[:, 1].view(N, 1) + patch_offsets[:, 1].view(N, 1) # [compute_batch_size, h * w]
+            assert torch.all((x_cam <= 1.0) & (x_cam >= 0.0)), "x_cam should be in range [0, 1]"
+            assert torch.all((y_cam <= 1.0) & (y_cam >= 0.0)), "y_cam should be in range [0, 1]"
 
         # NOTE: ?????, in dataset, sk is always 0
         x_lift = (x_cam - cx.unsqueeze(-1) + cy.unsqueeze(-1) * sk.unsqueeze(-1) / fy.unsqueeze(-1) - sk.unsqueeze(-1) * y_cam / fy.unsqueeze(-1)) / fx.unsqueeze(-1) * z_cam
