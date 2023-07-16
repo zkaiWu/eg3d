@@ -373,8 +373,8 @@ def training_loop(
                 print('Aborting...')
 
         # Save image snapshot.
-        print("save image snapshot")
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
+            print("save image snapshot")
             out = [G_ema(z=z, c=c, noise_mode='const', neural_rendering_resolution=training_set.resolution) for z, c in zip(grid_z, grid_c)]
             images = torch.cat([o['image'].cpu() for o in out]).numpy()
             images_raw = torch.cat([o['image_raw'].cpu() for o in out]).numpy()
