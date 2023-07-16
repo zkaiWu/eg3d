@@ -14,4 +14,4 @@ CUDA_VISIBLE_DEVICES=$CIDX python train.py \
     --batch=$BATCH_SIZE \
     --gamma=1 \
     --gen_pose_cond=True \
-    --mbstd-group $GPU_NUM \
+    --mbstd-group $MBSTD \
