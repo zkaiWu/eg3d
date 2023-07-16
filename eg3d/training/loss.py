@@ -108,6 +108,7 @@ class StyleGAN2Loss(Loss):
             neural_rendering_resolution = self.neural_rendering_resolution_initial
 
         real_img_raw = filtered_resizing(real_img, size=neural_rendering_resolution, f=self.resample_filter, filter_mode=self.filter_mode)
+        real_img = filtered_resizing(real_img, size=neural_rendering_resolution, f=self.resample_filter, filter_mode=self.filter_mode)
 
         if self.blur_raw_target:
             blur_size = np.floor(blur_sigma * 3)
