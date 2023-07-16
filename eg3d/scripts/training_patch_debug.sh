@@ -3,7 +3,8 @@
 CIDX=$1
 GPU_NUM=$2
 BATCH_SIZE=$3
-OUTPUT_DIR=$4
+MBSTD=$4
+OUTPUT_DIR=$5
 
 CUDA_VISIBLE_DEVICES=$CIDX python train.py \
     --outdir=$OUTPUT_DIR \
