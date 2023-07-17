@@ -50,8 +50,6 @@ class StyleGAN2Loss(Loss):
         self.gpc_reg_fade_kimg = gpc_reg_fade_kimg
         self.gpc_reg_prob = gpc_reg_prob
         self.dual_discrimination = dual_discrimination
-        if patch_cfg['enabled']:
-            self.dual_discrimination = False
         self.filter_mode = filter_mode
         self.resample_filter = upfirdn2d.setup_filter([1,3,3,1], device=device)
         self.blur_raw_target = True
@@ -59,7 +57,6 @@ class StyleGAN2Loss(Loss):
         assert self.gpc_reg_prob is None or (0 <= self.gpc_reg_prob <= 1)
 
         self.progressive_update(0)
-
 
     def progressive_update(self, cur_kimg: int):
         if self.patch_cfg['enabled']:
@@ -76,10 +73,11 @@ class StyleGAN2Loss(Loss):
     def extract_patches(self, img: torch.Tensor):
         patch_params = sample_patch_params(len(img['image']), self.patch_cfg, device=img['image'].device)
         # NOTE: fake patch_params in D for debugging
-        patch_params['scales'].fill_(1.0)
-        patch_params['offsets'].fill_(0.0)
-        assert torch.all(patch_params['scales'] == 1.0) and torch.all(patch_params['offsets'] == 0.0), \
-            f'we using fix params for debug. expect scales 1.0 offsets 0.0 but expect scales {patch_params["scales"]} offsets {patch_params["offsets"]}'
+        if self.patch_cfg['patch_fake'] == True:
+            patch_params['scales'].fill_(1.0)
+            patch_params['offsets'].fill_(0.0)
+            assert torch.all(patch_params['scales'] == 1.0) and torch.all(patch_params['offsets'] == 0.0), \
+                f'we using fix params for debug. expect scales 1.0 offsets 0.0 but expect scales {patch_params["scales"]} offsets {patch_params["offsets"]}'
         img_resolution = img['image'].shape[-1]
         img['image'] = extract_patches(img['image'], patch_params, resolution=int(img_resolution * self.patch_cfg['min_scale'])) # [batch_size, c, h_patch, w_patch]
         return img, patch_params
@@ -99,14 +97,14 @@ class StyleGAN2Loss(Loss):
                 cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
                 cutoff = torch.where(torch.rand([], device=ws.device) < self.style_mixing_prob, cutoff, torch.full_like(cutoff, ws.shape[1]))
                 ws[:, cutoff:] = self.G.mapping(torch.randn_like(z), c, update_emas=False)[:, cutoff:]
-
         patch_params = sample_patch_params(len(z), self.patch_cfg, device=z.device) if self.patch_cfg['enabled'] else None
 
-        # NOTE: fake patch_params for debugging
-        patch_params['scales'].fill_(1.0)
-        patch_params['offsets'].fill_(0.0)
-        assert torch.all(patch_params['scales'] == 1.0) and torch.all(patch_params['offsets'] == 0.0), \
-            f'we using fix params for debug. expect scales 1.0 offsets 0.0 but expect scales {patch_params["scales"]} offsets {patch_params["offsets"]}'
+        if self.patch_cfg['patch_fake'] == True:
+            # NOTE: fake patch_params for debugging
+            patch_params['scales'].fill_(1.0)
+            patch_params['offsets'].fill_(0.0)
+            assert torch.all(patch_params['scales'] == 1.0) and torch.all(patch_params['offsets'] == 0.0), \
+                f'we using fix params for debug. expect scales 1.0 offsets 0.0 but expect scales {patch_params["scales"]} offsets {patch_params["offsets"]}'
         gen_output = self.G.synthesis(ws, c, neural_rendering_resolution=neural_rendering_resolution, update_emas=update_emas, patch_params=patch_params)
         return gen_output, ws, patch_params
 
@@ -125,12 +123,11 @@ class StyleGAN2Loss(Loss):
             img['image'] = augmented_pair[:, :img['image'].shape[1]]
             img['image_raw'] = torch.nn.functional.interpolate(augmented_pair[:, img['image'].shape[1]:], size=img['image_raw'].shape[2:], mode='bilinear', antialias=True)
         
-        # adapt to epigraf_discrimination
-        if self.patch_cfg['enabled']:
+        if self.dual_discrimination:  # dual_discriminator
+            logits = self.D(img, c, update_emas=update_emas)
+        else: # epigraf
             img = img['image']
             logits = self.D(img, c, update_emas=update_emas, **kwargs)
-        else:
-            logits = self.D(img, c, update_emas=update_emas)
         return logits
 
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
@@ -304,8 +301,8 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function(name + '_forward'):
                 if self.patch_cfg['enabled']:
                     (real_img_patch, patch_params) = self.extract_patches(real_img) if self.patch_cfg['enabled'] else (real_img, None)
-                    real_img_tmp_image = real_img_patch['image'].detach().requires_grad_(phase in ['Dreg', 'Dall'])
-                    real_img_tmp_image_raw = real_img['image_raw'].detach().requires_grad_(phase in ['Dreg', 'Dall'])
+                    real_img_tmp_image = real_img_patch['image'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
+                    real_img_tmp_image_raw = real_img['image_raw'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
                     real_img_tmp = {'image': real_img_tmp_image, 'image_raw': real_img_tmp_image_raw}
                     real_logits = self.run_D(real_img_tmp, real_c, blur_sigma=blur_sigma, patch_params=patch_params)
                 else:
@@ -329,7 +326,7 @@ class StyleGAN2Loss(Loss):
                             r1_grads_image = r1_grads[0]
                             r1_grads_image_raw = r1_grads[1]
                         r1_penalty = r1_grads_image.square().sum([1,2,3]) + r1_grads_image_raw.square().sum([1,2,3])
-                    else: # single discrimination
+                    else: # epigraf discriminator
                         with torch.autograd.profiler.record_function('r1_grads'), conv2d_gradfix.no_weight_gradients():
                             r1_grads = torch.autograd.grad(outputs=[real_logits.sum()], inputs=[real_img_tmp['image']], create_graph=True, only_inputs=True)
                             r1_grads_image = r1_grads[0]

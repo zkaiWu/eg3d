@@ -142,6 +142,7 @@ def parse_comma_separated_list(s):
 @click.option('--aug',          help='Augmentation mode',                                       type=click.Choice(['noaug', 'ada', 'fixed']), default='noaug', show_default=True)
 @click.option('--resume',       help='Resume from given network pickle', metavar='[PATH|URL]',  type=str)
 @click.option('--freezed',      help='Freeze first layers of D', metavar='INT',                 type=click.IntRange(min=0), default=0, show_default=True)
+@click.option('--discriminator',      help='what discriminator to use', metavar='STR',                type=click.Choice(['dual', 'epigraf']), default='epigraf', show_default=True)
 
 # Misc hyperparameters.
 @click.option('--p',            help='Probability for --aug=fixed', metavar='FLOAT',            type=click.FloatRange(min=0, max=1), default=0.2, show_default=True)
@@ -195,6 +196,7 @@ def parse_comma_separated_list(s):
 
 # patch cfg
 @click.option('--patch_enable',    help='whether to use patch rendering', metavar='BOOL',  type=bool, required=False, default=True)
+@click.option('--patch_fake',    help='using scale:1.0, offset:0.0 for debugging', metavar='BOOL',  type=bool, required=False, default=False)
 @click.option('--patch_distribution',    help='patch distribution', metavar='STR',  type=click.Choice(['uniform', 'beta']), required=False, default='beta')
 @click.option('--min_scale',    help='min scale of the patch', metavar='FLOAT',  type=float, required=False, default=0.25)
 @click.option('--max_scale',    help='max scale of the patch', metavar='FLOAT',  type=float, required=False, default=1.0)
@@ -275,9 +277,19 @@ def main(**kwargs):
     c.ema_kimg = c.batch_size * 10 / 32
     c.G_kwargs.class_name = 'training.triplane.TriPlaneGenerator'
 
-    if not opts.patch_enable:
+    # if not opts.patch_enable:
+    #     c.D_kwargs.class_name = 'training.dual_discriminator.DualDiscriminator'
+    # else:
+    #     if opts.discriminator == 'dual':
+    #         c.D_kwargs.class_name = 'training.dual_discriminator.DualDiscriminator'
+    #     elif opts.dicriminator == 'epigraf':    # using epigraf discriminator
+    #         c.D_kwargs.class_name = 'training.epigraf_discriminator.Discriminator'
+
+    if opts.discriminator == 'epigraf' and opts.patch_enable == False:
+        raise ValueError("discriminator for epigraf could only be used at patch rendering mode (patch_enable == True)")
+    if opts.discriminator == 'dual':
         c.D_kwargs.class_name = 'training.dual_discriminator.DualDiscriminator'
-    else:
+    elif opts.dicriminator == 'epigraf':    # using epigraf discriminator
         c.D_kwargs.class_name = 'training.epigraf_discriminator.Discriminator'
 
     c.G_kwargs.fused_modconv_default = 'inference_only' # Speed up training by using regular convolutions instead of grouped convolutions.
@@ -356,7 +368,12 @@ def main(**kwargs):
 
     c.loss_kwargs.gpc_reg_prob = opts.gpc_reg_prob if opts.gen_pose_cond else None
     c.loss_kwargs.gpc_reg_fade_kimg = opts.gpc_reg_fade_kimg
-    c.loss_kwargs.dual_discrimination = True
+
+    if opts.discriminator == 'dual':
+        c.loss_kwargs.dual_discrimination = True
+    elif opts.discriminator == 'epigraf':
+        c.loss_kwargs.dual_discrimination = False
+        
     c.loss_kwargs.neural_rendering_resolution_initial = opts.neural_rendering_resolution_initial
     c.loss_kwargs.neural_rendering_resolution_final = opts.neural_rendering_resolution_final
     c.loss_kwargs.neural_rendering_resolution_fade_kimg = opts.neural_rendering_resolution_fade_kimg
@@ -372,6 +389,7 @@ def main(**kwargs):
         'beta_val_end': opts.beta_val_end,
         'mbstd_group_size': opts.mbstd_group,
         'anneal_kimg': opts.anneal_kimg,
+        'patch_fake': opts.patch_fake,
     }
 
     
