@@ -74,6 +74,7 @@ class StyleGAN2Loss(Loss):
         patch_params = sample_patch_params(len(img['image']), self.patch_cfg, device=img['image'].device)
         # NOTE: fake patch_params in D for debugging
         if self.patch_cfg['patch_fake'] == True:
+            # print('fill patch params in extract_patches')
             patch_params['scales'].fill_(1.0)
             patch_params['offsets'].fill_(0.0)
             assert torch.all(patch_params['scales'] == 1.0) and torch.all(patch_params['offsets'] == 0.0), \
@@ -100,6 +101,7 @@ class StyleGAN2Loss(Loss):
         patch_params = sample_patch_params(len(z), self.patch_cfg, device=z.device) if self.patch_cfg['enabled'] else None
 
         if self.patch_cfg['patch_fake'] == True:
+            # print('fill patch params in run_G')
             # NOTE: fake patch_params for debugging
             patch_params['scales'].fill_(1.0)
             patch_params['offsets'].fill_(0.0)

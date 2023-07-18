@@ -289,7 +289,7 @@ def main(**kwargs):
         raise ValueError("discriminator for epigraf could only be used at patch rendering mode (patch_enable == True)")
     if opts.discriminator == 'dual':
         c.D_kwargs.class_name = 'training.dual_discriminator.DualDiscriminator'
-    elif opts.dicriminator == 'epigraf':    # using epigraf discriminator
+    elif opts.discriminator == 'epigraf':    # using epigraf discriminator
         c.D_kwargs.class_name = 'training.epigraf_discriminator.Discriminator'
 
     c.G_kwargs.fused_modconv_default = 'inference_only' # Speed up training by using regular convolutions instead of grouped convolutions.
@@ -405,6 +405,7 @@ def main(**kwargs):
 
     # Augmentation.
     if opts.aug != 'noaug':
+        print('no aug')
         c.augment_kwargs = dnnlib.EasyDict(class_name='training.augment.AugmentPipe', xflip=0.0, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1)
         if opts.aug == 'ada':
             c.ada_target = opts.target

@@ -16,5 +16,12 @@ CUDA_VISIBLE_DEVICES=$CIDX python train.py \
     --gen_pose_cond=True \
     --mbstd-group $MBSTD \
     --metrics fid2k_full_for_patch_rendering \
-    --aug ada \
+    --discriminator epigraf \
+    --patch_enable True \
     --gamma 0.1 \
+    --aug noaug \
+    --kimg 5000 \
+    --anneal_kimg 3000 \
+    # --patch_fake True \
+    # --aug ada \
+    # --gamma 0.1 \
