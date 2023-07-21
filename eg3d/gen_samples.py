@@ -173,10 +173,11 @@ def generate_images(
 
             ws = G.mapping(z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
             # NOTE: add patch_param for debug
-            patch_params = {
-                "scales" : torch.tensor([[0.25, 0.25]]).to(device),
-                "offsets" : torch.tensor([[0.5, 0.5]]).to(device),
-            }
+            # patch_params = {
+            #     "scales" : torch.tensor([[0.3567, 0.3567]]).to(device),
+            #     "offsets" : torch.tensor([[0.1056, 0.4724]]).to(device),
+            # }
+            patch_params = None
             img = G.synthesis(ws, camera_params, neural_rendering_resolution=64, patch_params=patch_params)['image']
 
             img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
