@@ -16,6 +16,8 @@ from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
 from torch_utils.ops import upfirdn2d
 from training.dual_discriminator import filtered_resizing
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from training.training_utils import sample_patch_params, extract_patches
 
 #----------------------------------------------------------------------------
 
@@ -26,7 +28,7 @@ class Loss:
 #----------------------------------------------------------------------------
 
 class StyleGAN2Loss(Loss):
-    def __init__(self, device, G, D, augment_pipe=None, r1_gamma=10, style_mixing_prob=0, pl_weight=0, pl_batch_shrink=2, pl_decay=0.01, pl_no_weight_grad=False, blur_init_sigma=0, blur_fade_kimg=0, r1_gamma_init=0, r1_gamma_fade_kimg=0, neural_rendering_resolution_initial=64, neural_rendering_resolution_final=None, neural_rendering_resolution_fade_kimg=0, gpc_reg_fade_kimg=1000, gpc_reg_prob=None, dual_discrimination=False, filter_mode='antialiased'):
+    def __init__(self, device, G, D, augment_pipe=None, r1_gamma=10, style_mixing_prob=0, pl_weight=0, pl_batch_shrink=2, pl_decay=0.01, pl_no_weight_grad=False, blur_init_sigma=0, blur_fade_kimg=0, r1_gamma_init=0, r1_gamma_fade_kimg=0, neural_rendering_resolution_initial=64, neural_rendering_resolution_final=None, neural_rendering_resolution_fade_kimg=0, gpc_reg_fade_kimg=1000, gpc_reg_prob=None, dual_discrimination=False, use_mimic3d=False, filter_mode='antialiased', patch_cfg=None):
         super().__init__()
         self.device             = device
         self.G                  = G
@@ -52,6 +54,9 @@ class StyleGAN2Loss(Loss):
         self.filter_mode = filter_mode
         self.resample_filter = upfirdn2d.setup_filter([1,3,3,1], device=device)
         self.blur_raw_target = True
+        self.use_mimic3d = use_mimic3d
+        self.lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+        self.patch_cfg = patch_cfg
         assert self.gpc_reg_prob is None or (0 <= self.gpc_reg_prob <= 1)
 
     def run_G(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
@@ -72,6 +77,47 @@ class StyleGAN2Loss(Loss):
         return gen_output, ws
 
     def run_D(self, img, c, blur_sigma=0, blur_sigma_raw=0, update_emas=False):
+        blur_size = np.floor(blur_sigma * 3)
+        if blur_size > 0:
+            with torch.autograd.profiler.record_function('blur'):
+                f = torch.arange(-blur_size, blur_size + 1, device=img['image'].device).div(blur_sigma).square().neg().exp2()
+                img['image'] = upfirdn2d.filter2d(img['image'], f / f.sum())
+
+        # only use augment_pipe in discriminator, but always disabled for ed3g
+        if self.augment_pipe is not None:
+            augmented_pair = self.augment_pipe(torch.cat([img['image'],
+                                                    torch.nn.functional.interpolate(img['image_raw'], size=img['image'].shape[2:], mode='bilinear', antialias=True)],
+                                                    dim=1))
+            img['image'] = augmented_pair[:, :img['image'].shape[1]]
+            img['image_raw'] = torch.nn.functional.interpolate(augmented_pair[:, img['image'].shape[1]:], size=img['image_raw'].shape[2:], mode='bilinear', antialias=True)
+
+        logits = self.D(img, c, update_emas=update_emas)
+        return logits
+
+
+    def run_G_patch(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
+        if swapping_prob is not None:
+            # roll along the batch dimension
+            c_swapped = torch.roll(c.clone(), 1, 0)
+            c_gen_conditioning = torch.where(torch.rand((c.shape[0], 1), device=c.device) < swapping_prob, c_swapped, c)
+        else:
+            c_gen_conditioning = torch.zeros_like(c)
+
+        ws = self.G.mapping(z, c_gen_conditioning, update_emas=update_emas)
+        if self.style_mixing_prob > 0:
+            with torch.autograd.profiler.record_function('style_mixing'):
+                cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
+                cutoff = torch.where(torch.rand([], device=ws.device) < self.style_mixing_prob, cutoff, torch.full_like(cutoff, ws.shape[1]))
+                ws[:, cutoff:] = self.G.mapping(torch.randn_like(z), c, update_emas=False)[:, cutoff:]
+
+        # Get patch parameters to render patches
+        patch_params = sample_patch_params(len(z), device=z.device)
+        gen_output = self.G.synthesis(ws, c, neural_rendering_resolution=neural_rendering_resolution, update_emas=update_emas, patch_branch=True, patch_params=patch_params)
+        return gen_output, ws
+
+
+    def run_D_patch(self, img, c, blur_sigma=0, blur_sigma_raw=0, update_emas=False):
+        # TODO: construct an another discriminator for high resolution branch
         blur_size = np.floor(blur_sigma * 3)
         if blur_size > 0:
             with torch.autograd.profiler.record_function('blur'):
@@ -128,6 +174,23 @@ class StyleGAN2Loss(Loss):
                 training_stats.report('Loss/G/loss', loss_Gmain)
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 loss_Gmain.mean().mul(gain).backward()
+            
+            if self.use_mimic3d:
+                with torch.autograd.profiler.record_function('Gmain_forward_highres'):
+                    patch_gen_img, _gen_ws, patch_params = self.run_G_patch(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=self.patch_cfg['patch_res'])
+                    gen_logits = self.run_D_patch(patch_gen_img, gen_c, blur_sigma=blur_sigma)
+                    training_stats.report('Loss/scores_hr/fake', gen_logits)
+                    training_stats.report('Loss/signs_hr/fake', gen_logits.sign())
+                    loss_Gmain_patch = torch.nn.functional.softplus(-gen_logits)
+                    training_stats.report('Loss/G_hr/loss', loss_Gmain)
+                with torch.autograd.profiler.record_function('Gmain_backward_highres'):
+                    loss_Gmain_patch.mean().mul(gain).backward()
+                with torch.autograd.profiler.record_function('Imitation_loss'):
+                    super_patch = gen_img.clone().detach()          # stop gradient
+                    super_patch = extract_patches(super_patch, patch_params, resolution=patch_gen_img['image'].shape[2])
+                    lpips_loss = self.lpips(super_patch, patch_gen_img['image'])
+                with torch.autograd.profiler.record_function('Imitation_loss_backward'):
+                    lpips_loss.mean().mul(gain).backward()
 
         # Density Regularization
         if phase in ['Greg', 'Gboth'] and self.G.rendering_kwargs.get('density_reg', 0) > 0 and self.G.rendering_kwargs['reg_type'] == 'l1':
@@ -173,7 +236,6 @@ class StyleGAN2Loss(Loss):
 
             monotonic_loss = torch.relu(sigma_initial.detach() - sigma_perturbed).mean() * 10
             monotonic_loss.mul(gain).backward()
-
 
             if swapping_prob is not None:
                 c_swapped = torch.roll(gen_c.clone(), 1, 0)
@@ -253,6 +315,16 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function('Dgen_backward'):
                 loss_Dgen.mean().mul(gain).backward()
 
+            if self.use_mimic3d:
+                with torch.autograd.profiler.record_function('Dgen_forward_highres'):
+                    patch_gen_img, _gen_ws, patch_params = self.run_G_patch(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=neural_rendering_resolution)
+                    gen_logits = self.run_D_patch(patch_gen_img, gen_c, blur_sigma=blur_sigma, update_emas=True)
+                    training_stats.report('Loss/scores_hr/fake', gen_logits)
+                    training_stats.report('Loss/signs_hr/fake', gen_logits.sign())
+                    loss_Dgen_patch = torch.nn.functional.softplus(gen_logits)
+                with torch.autograd.profiler.record_function('Dgen_backward_highres'):
+                    loss_Dgen_patch.mean().mul(gain).backward()
+
         # Dmain: Maximize logits for real images.
         # Dr1: Apply R1 regularization.
         if phase in ['Dmain', 'Dreg', 'Dboth']:
@@ -290,5 +362,46 @@ class StyleGAN2Loss(Loss):
 
             with torch.autograd.profiler.record_function(name + '_backward'):
                 (loss_Dreal + loss_Dr1).mean().mul(gain).backward()
+
+            # for mimic 3d branc 
+            if self.use_mimic3d:
+                with torch.autograd.profiler.record_function(name + '_hr_forward'):
+                    # real_img_tmp_image = real_img['image'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
+                    # real_img_tmp_image_raw = real_img['image_raw'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
+                    # real_img_tmp = {'image': real_img_tmp_image, 'image_raw': real_img_tmp_image_raw}
+                    real_img_tmp_image = real_img['image'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
+                    patch_params = sample_patch_params(len(real_img_tmp_image), device=real_img_tmp_image.device)
+                    real_img_tmp_image_patch = extract_patches(real_img_tmp_image, patch_params=patch_params, resolution=self.patch_cfg['patch_res'])
+                    real_img_tmp = {'image': real_img_tmp_image_patch}
+
+                    real_logits = self.run_D_patch(real_img_tmp, real_c, blur_sigma=blur_sigma)
+                    training_stats.report('Loss/scores_hr/real', real_logits)
+                    training_stats.report('Loss/signs_hr/real', real_logits.sign())
+
+                    loss_Dreal = 0
+                    if phase in ['Dmain', 'Dboth']:
+                        loss_Dreal = torch.nn.functional.softplus(-real_logits)
+                        training_stats.report('Loss/D_hr/loss', loss_Dgen + loss_Dreal)
+
+                    loss_Dr1 = 0
+                    if phase in ['Dreg', 'Dboth']:
+                        if self.dual_discrimination:
+                            with torch.autograd.profiler.record_function('r1_grads_hr'), conv2d_gradfix.no_weight_gradients():
+                                r1_grads = torch.autograd.grad(outputs=[real_logits.sum()], inputs=[real_img_tmp['image'], real_img_tmp['image_raw']], create_graph=True, only_inputs=True)
+                                r1_grads_image = r1_grads[0]
+                                r1_grads_image_raw = r1_grads[1]
+                            r1_penalty = r1_grads_image.square().sum([1,2,3]) + r1_grads_image_raw.square().sum([1,2,3])
+                        else: # single discrimination
+                            with torch.autograd.profiler.record_function('r1_grads_hr'), conv2d_gradfix.no_weight_gradients():
+                                r1_grads = torch.autograd.grad(outputs=[real_logits.sum()], inputs=[real_img_tmp['image']], create_graph=True, only_inputs=True)
+                                r1_grads_image = r1_grads[0]
+                            r1_penalty = r1_grads_image.square().sum([1,2,3])
+                        loss_Dr1 = r1_penalty * (r1_gamma / 2)
+                        training_stats.report('Loss/r1_penalty_hr', r1_penalty)
+                        training_stats.report('Loss/D_hr/reg', loss_Dr1)
+
+                with torch.autograd.profiler.record_function(name + '_backward'):
+                    (loss_Dreal + loss_Dr1).mean().mul(gain).backward()
+                
 
 #----------------------------------------------------------------------------

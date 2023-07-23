@@ -193,6 +193,9 @@ def parse_comma_separated_list(s):
 @click.option('--reg_type', help='Type of regularization', metavar='STR',  type=click.Choice(['l1', 'l1-alt', 'monotonic-detach', 'monotonic-fixed', 'total-variation']), required=False, default='l1')
 @click.option('--decoder_lr_mul',    help='decoder learning rate multiplier.', metavar='FLOAT', type=click.FloatRange(min=0), default=1, required=False, show_default=True)
 
+# Config for mimic3d
+@click.option('--use_mimic3d', help='If true, using mimic3d strategy.', metavar='BOOL',  type=bool, required=False, default=True)
+@click.option('--tri_res',    help='resolution for triplane super resolution module', metavar='INT',   type=click.IntRange(min=1), default=256, show_default=True)
 def main(**kwargs):
     """Train a GAN using the techniques described in the paper
     "Alias-Free Generative Adversarial Networks".
@@ -296,6 +299,9 @@ def main(**kwargs):
         'reg_type': opts.reg_type, # for experimenting with variations on density regularization
         'decoder_lr_mul': opts.decoder_lr_mul, # learning rate multiplier for decoder
         'sr_antialias': True,
+        ################################# if using mimic3d ###########################
+        'use_mimic3d': opts.use_mimic3d,
+        'tri_res': opts.tri_res,
     }
 
     if opts.cfg == 'ffhq':
@@ -331,6 +337,12 @@ def main(**kwargs):
         })
     else:
         assert False, "Need to specify config"
+
+    patch_cfg = {
+        'patch_res': 64,
+        'hr_res': 256
+    }
+    c.loss_kwargs.patch_cfg = patch_cfg
 
 
     if opts.density_reg > 0:
