@@ -20,6 +20,7 @@ import re
 import json
 import tempfile
 import torch
+import copy 
 
 import dnnlib
 from training import training_loop
@@ -226,6 +227,7 @@ def main(**kwargs):
     c.D_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.Discriminator', block_kwargs=dnnlib.EasyDict(), mapping_kwargs=dnnlib.EasyDict(), epilogue_kwargs=dnnlib.EasyDict())
     c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
+    c.D_hr_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss')
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
@@ -390,6 +392,13 @@ def main(**kwargs):
     c.D_kwargs.num_fp16_res = opts.d_num_fp16_res
     c.D_kwargs.conv_clamp = 256 if opts.d_num_fp16_res > 0 else None
 
+    # for mimic3
+    if opts.use_mimic3d:
+        c.D_hr_kwargs = copy.deepcopy(c.D_kwargs)
+        c.D_hr_kwargs.class_name = 'training.networks_stylegan2.SingleDiscriminator'
+    else:
+        c.D_hr_kwargs = None
+
     if opts.nobench:
         c.cudnn_benchmark = False
 
@@ -397,6 +406,7 @@ def main(**kwargs):
     desc = f'{opts.cfg:s}-{dataset_name:s}-gpus{c.num_gpus:d}-batch{c.batch_size:d}-gamma{c.loss_kwargs.r1_gamma:g}'
     if opts.desc is not None:
         desc += f'-{opts.desc}'
+
 
     # Launch.
     launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run)
