@@ -148,7 +148,6 @@ def copy_json(args):
 
     input_dir = args.input_dir 
     output_dir = args.output_dir
-    import pdb; pdb.set_trace()
 
     for obj_name in os.listdir(input_dir):
         output_obj_name = obj_name 
