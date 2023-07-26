@@ -28,11 +28,12 @@ class Loss:
 #----------------------------------------------------------------------------
 
 class StyleGAN2Loss(Loss):
-    def __init__(self, device, G, D, augment_pipe=None, r1_gamma=10, style_mixing_prob=0, pl_weight=0, pl_batch_shrink=2, pl_decay=0.01, pl_no_weight_grad=False, blur_init_sigma=0, blur_fade_kimg=0, r1_gamma_init=0, r1_gamma_fade_kimg=0, neural_rendering_resolution_initial=64, neural_rendering_resolution_final=None, neural_rendering_resolution_fade_kimg=0, gpc_reg_fade_kimg=1000, gpc_reg_prob=None, dual_discrimination=False, use_mimic3d=False, filter_mode='antialiased', patch_cfg=None):
+    def __init__(self, device, G, D, D3d, augment_pipe=None, r1_gamma=10, style_mixing_prob=0, pl_weight=0, pl_batch_shrink=2, pl_decay=0.01, pl_no_weight_grad=False, blur_init_sigma=0, blur_fade_kimg=0, r1_gamma_init=0, r1_gamma_fade_kimg=0, neural_rendering_resolution_initial=64, neural_rendering_resolution_final=None, neural_rendering_resolution_fade_kimg=0, gpc_reg_fade_kimg=1000, gpc_reg_prob=None, dual_discrimination=False, use_mimic3d=False, filter_mode='antialiased', patch_cfg=None):
         super().__init__()
         self.device             = device
         self.G                  = G
         self.D                  = D
+        self.D3d                = D3d
         self.augment_pipe       = augment_pipe
         self.r1_gamma           = r1_gamma
         self.style_mixing_prob  = style_mixing_prob
@@ -54,7 +55,10 @@ class StyleGAN2Loss(Loss):
         self.filter_mode = filter_mode
         self.resample_filter = upfirdn2d.setup_filter([1,3,3,1], device=device)
         self.blur_raw_target = True
+
+        # mimic 3d config
         self.use_mimic3d = use_mimic3d
+        assert self.use_mimic3d and self.D3d is not None, "When using mimic3d, D3d must be provided"
         self.lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
         self.patch_cfg = patch_cfg
         assert self.gpc_reg_prob is None or (0 <= self.gpc_reg_prob <= 1)
@@ -95,7 +99,7 @@ class StyleGAN2Loss(Loss):
         return logits
 
 
-    def run_G_patch(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
+    def run_G_3D(self, z, c, swapping_prob, neural_rendering_resolution, update_emas=False):
         if swapping_prob is not None:
             # roll along the batch dimension
             c_swapped = torch.roll(c.clone(), 1, 0)
@@ -112,12 +116,13 @@ class StyleGAN2Loss(Loss):
 
         # Get patch parameters to render patches
         patch_params = sample_patch_params(len(z), device=z.device)
+        # using patch_branch and set patch_params
         gen_output = self.G.synthesis(ws, c, neural_rendering_resolution=neural_rendering_resolution, update_emas=update_emas, patch_branch=True, patch_params=patch_params)
         return gen_output, ws
 
 
-    def run_D_patch(self, img, c, blur_sigma=0, blur_sigma_raw=0, update_emas=False):
-        # TODO: construct an another discriminator for high resolution branch
+    def run_D_3D(self, img, c, blur_sigma=0, blur_sigma_raw=0, update_emas=False):
+        # TODO: construct an another discriminator for 3D branch
         blur_size = np.floor(blur_sigma * 3)
         if blur_size > 0:
             with torch.autograd.profiler.record_function('blur'):
@@ -126,13 +131,14 @@ class StyleGAN2Loss(Loss):
 
         # only use augment_pipe in discriminator, but always disabled for ed3g
         if self.augment_pipe is not None:
-            augmented_pair = self.augment_pipe(torch.cat([img['image'],
-                                                    torch.nn.functional.interpolate(img['image_raw'], size=img['image'].shape[2:], mode='bilinear', antialias=True)],
-                                                    dim=1))
-            img['image'] = augmented_pair[:, :img['image'].shape[1]]
-            img['image_raw'] = torch.nn.functional.interpolate(augmented_pair[:, img['image'].shape[1]:], size=img['image_raw'].shape[2:], mode='bilinear', antialias=True)
+            # augmented_pair = self.augment_pipe(torch.cat([img['image'],
+            #                                         torch.nn.functional.interpolate(img['image_raw'], size=img['image'].shape[2:], mode='bilinear', antialias=True)],
+            #                                         dim=1))
+            # img['image'] = augmented_pair[:, :img['image'].shape[1]]
+            # img['image_raw'] = torch.nn.functional.interpolate(augmented_pair[:, img['image'].shape[1]:], size=img['image_raw'].shape[2:], mode='bilinear', antialias=True)
+            img['image'] = self.augment_pipe(img['image'])
 
-        logits = self.D(img, c, update_emas=update_emas)
+        logits = self.D3d(img, c, update_emas=update_emas)
         return logits
 
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, gain, cur_nimg):
@@ -177,8 +183,8 @@ class StyleGAN2Loss(Loss):
             
             if self.use_mimic3d:
                 with torch.autograd.profiler.record_function('Gmain_forward_highres'):
-                    patch_gen_img, _gen_ws, patch_params = self.run_G_patch(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=self.patch_cfg['patch_res'])
-                    gen_logits = self.run_D_patch(patch_gen_img, gen_c, blur_sigma=blur_sigma)
+                    patch_gen_img, _gen_ws, patch_params = self.run_G_3D(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=self.patch_cfg['patch_res'])
+                    gen_logits = self.run_D_3D(patch_gen_img, gen_c, blur_sigma=blur_sigma)
                     training_stats.report('Loss/scores_hr/fake', gen_logits)
                     training_stats.report('Loss/signs_hr/fake', gen_logits.sign())
                     loss_Gmain_patch = torch.nn.functional.softplus(-gen_logits)
@@ -317,8 +323,8 @@ class StyleGAN2Loss(Loss):
 
             if self.use_mimic3d:
                 with torch.autograd.profiler.record_function('Dgen_forward_highres'):
-                    patch_gen_img, _gen_ws, patch_params = self.run_G_patch(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=neural_rendering_resolution)
-                    gen_logits = self.run_D_patch(patch_gen_img, gen_c, blur_sigma=blur_sigma, update_emas=True)
+                    patch_gen_img, _gen_ws, patch_params = self.run_G_3D(gen_z, gen_c, swapping_prob=swapping_prob, neural_rendering_resolution=neural_rendering_resolution)
+                    gen_logits = self.run_D_3D(patch_gen_img, gen_c, blur_sigma=blur_sigma, update_emas=True)
                     training_stats.report('Loss/scores_hr/fake', gen_logits)
                     training_stats.report('Loss/signs_hr/fake', gen_logits.sign())
                     loss_Dgen_patch = torch.nn.functional.softplus(gen_logits)
@@ -363,7 +369,7 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function(name + '_backward'):
                 (loss_Dreal + loss_Dr1).mean().mul(gain).backward()
 
-            # for mimic 3d branc 
+            # for mimic 3d branch 
             if self.use_mimic3d:
                 with torch.autograd.profiler.record_function(name + '_hr_forward'):
                     # real_img_tmp_image = real_img['image'].detach().requires_grad_(phase in ['Dreg', 'Dboth'])
@@ -374,7 +380,7 @@ class StyleGAN2Loss(Loss):
                     real_img_tmp_image_patch = extract_patches(real_img_tmp_image, patch_params=patch_params, resolution=self.patch_cfg['patch_res'])
                     real_img_tmp = {'image': real_img_tmp_image_patch}
 
-                    real_logits = self.run_D_patch(real_img_tmp, real_c, blur_sigma=blur_sigma)
+                    real_logits = self.run_D_3D(real_img_tmp, real_c, blur_sigma=blur_sigma)
                     training_stats.report('Loss/scores_hr/real', real_logits)
                     training_stats.report('Loss/signs_hr/real', real_logits.sign())
 

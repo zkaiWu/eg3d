@@ -197,6 +197,7 @@ def parse_comma_separated_list(s):
 # Config for mimic3d
 @click.option('--use_mimic3d', help='If true, using mimic3d strategy.', metavar='BOOL',  type=bool, required=False, default=True)
 @click.option('--tri_res',    help='resolution for triplane super resolution module', metavar='INT',   type=click.IntRange(min=1), default=256, show_default=True)
+@click.option('--resume_from',  help='using eg3d for tunning a eg3d or using mimic3d for recover mimic3d training', metavar='STR',   type=click.Choice(['eg3d', 'mimic3d']), default='eg3d', show_default=True)
 def main(**kwargs):
     """Train a GAN using the techniques described in the paper
     "Alias-Free Generative Adversarial Networks".
@@ -223,11 +224,13 @@ def main(**kwargs):
     # Initialize config.
     opts = dnnlib.EasyDict(kwargs) # Command line arguments.
     c = dnnlib.EasyDict() # Main config dict.
+    c.use_mimic3d = opts.use_mimic3d
+    c.resume_from = opts.resume_from
     c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=512, w_dim=512, mapping_kwargs=dnnlib.EasyDict())
     c.D_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.Discriminator', block_kwargs=dnnlib.EasyDict(), mapping_kwargs=dnnlib.EasyDict(), epilogue_kwargs=dnnlib.EasyDict())
     c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.D_hr_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
+    c.D_3d_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss')
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
@@ -292,6 +295,7 @@ def main(**kwargs):
         'disparity_space_sampling': False,
         'clamp_mode': 'softplus',
         'superresolution_module': sr_module,
+        'triplane_superresolution_module': 'training.superresolution.TriplaneSuperresolutionHybrid2X', 
         'c_gen_conditioning_zero': not opts.gen_pose_cond, # if true, fill generator pose conditioning label with dummy zero vector
         'gpc_reg_prob': opts.gpc_reg_prob if opts.gen_pose_cond else None,
         'c_scale': opts.c_scale, # mutliplier for generator pose conditioning label
@@ -394,10 +398,10 @@ def main(**kwargs):
 
     # for mimic3
     if opts.use_mimic3d:
-        c.D_hr_kwargs = copy.deepcopy(c.D_kwargs)
-        c.D_hr_kwargs.class_name = 'training.networks_stylegan2.SingleDiscriminator'
+        c.D_3d_kwargs = copy.deepcopy(c.D_kwargs)
+        # c.D_3d_kwargs.class_name = 'training.dual_discriminator.SingleDiscriminator'
     else:
-        c.D_hr_kwargs = None
+        c.D_3d_kwargs = copy.deepcopy(c.D_kwargs)
 
     if opts.nobench:
         c.cudnn_benchmark = False
@@ -406,7 +410,6 @@ def main(**kwargs):
     desc = f'{opts.cfg:s}-{dataset_name:s}-gpus{c.num_gpus:d}-batch{c.batch_size:d}-gamma{c.loss_kwargs.r1_gamma:g}'
     if opts.desc is not None:
         desc += f'-{opts.desc}'
-
 
     # Launch.
     launch_training(c=c, desc=desc, outdir=opts.outdir, dry_run=opts.dry_run)

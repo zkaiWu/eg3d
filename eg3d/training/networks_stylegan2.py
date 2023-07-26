@@ -258,7 +258,6 @@ class MappingNetwork(torch.nn.Module):
                 x = x.unsqueeze(1).repeat([1, self.num_ws, 1])
 
         # Apply truncation.
-        import pdb; pdb.set_trace()
         if truncation_psi != 1:
             with torch.autograd.profiler.record_function('truncate'):
                 assert self.w_avg_beta is not None

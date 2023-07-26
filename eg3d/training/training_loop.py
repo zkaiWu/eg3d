@@ -98,10 +98,10 @@ def training_loop(
     data_loader_kwargs      = {},       # Options for torch.utils.data.DataLoader.
     G_kwargs                = {},       # Options for generator network.
     D_kwargs                = {},       # Options for discriminator network.
-    D_hr_kwars              = None,       # Options for discriminator network.
+    D_3d_kwargs              = None,       # Options for discriminator network.
     G_opt_kwargs            = {},       # Options for generator optimizer.
     D_opt_kwargs            = {},       # Options for discriminator optimizer.
-    D_hr_opt_kwargs         = None,       # Options for discriminator optimizer.
+    D_3d_opt_kwargs         = None,       # Options for discriminator optimizer.
     augment_kwargs          = None,     # Options for augmentation pipeline. None = disable.
     loss_kwargs             = {},       # Options for loss function.
     metrics                 = [],       # Metrics to evaluate during training.
@@ -127,6 +127,8 @@ def training_loop(
     cudnn_benchmark         = True,     # Enable torch.backends.cudnn.benchmark?
     abort_fn                = None,     # Callback function for determining whether to abort training. Must return consistent results across ranks.
     progress_fn             = None,     # Callback function for updating training progress. Called for all ranks.
+    use_mimic3d             = False,    # Use mimic3d branch or not 
+    resume_from             = 'eg3d',     # Resume from eg3d for tunning a eg3d, resume from mimic3d for recover training procedure
 ):
     # Initialize.
     start_time = time.time()
@@ -160,8 +162,10 @@ def training_loop(
     G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     G.register_buffer('dataset_label_std', torch.tensor(training_set.get_label_std()).to(device))
     D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+    # if use_mimic3d:
+    #     D_3d = dnnlib.util.construct_class_by_name(**D_3d_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     
-    
+    import pdb; pdb.set_trace()
     G_ema = copy.deepcopy(G).eval()
 
     # Resume from existing pickle.
@@ -169,7 +173,8 @@ def training_loop(
         print(f'Resuming from "{resume_pkl}"')
         with dnnlib.util.open_url(resume_pkl) as f:
             resume_data = legacy.load_network_pkl(f)
-        for name, module in [('G', G), ('D', D), ('G_ema', G_ema)]:
+        for name, module in [('G', G), ('D', D), ('G_ema', G_ema), ('D3d', D3d)] if use_mimic3d and resume_from == 'mimic3d' \
+            else [('G', G), ('D', D), ('G_ema', G_ema)]:
             misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
 
     # Print network summary tables.
@@ -194,7 +199,7 @@ def training_loop(
     # Distribute across GPUs.
     if rank == 0:
         print(f'Distributing across {num_gpus} GPUs...')
-    for module in [G, D, G_ema, augment_pipe]:
+    for module in [G, D, G_ema, augment_pipe, D3d] if use_mimic3d else [G, D, G_ema, augment_pipe]:
         if module is not None:
             for param in misc.params_and_buffers(module):
                 if param.numel() > 0 and num_gpus > 1:
@@ -203,9 +208,17 @@ def training_loop(
     # Setup training phases.
     if rank == 0:
         print('Setting up training phases...')
-    loss = dnnlib.util.construct_class_by_name(device=device, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
+    import pdb; pdb.set_trace()
+    loss = dnnlib.util.construct_class_by_name(device=device, G=G, D=D, D3d=D3d, augment_pipe=augment_pipe, **loss_kwargs) if use_mimic3d \
+            else dnnlib.util.construct_class_by_name(device=device, G=G, D=D, D3d=None, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
     phases = []
-    for name, module, opt_kwargs, reg_interval in [('G', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]:
+    module_list = [
+        ('G', G, G_opt_kwargs, G_reg_interval), 
+        ('D', D, D_opt_kwargs, D_reg_interval), 
+    ]
+    if use_mimic3d:
+        module_list.append(('D3d', D3d, D_3d_opt_kwargs, D_reg_interval))
+    for name, module, opt_kwargs, reg_interval in module_list:
         if reg_interval is None:
             opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs) # subclass of torch.optim.Optimizer
             phases += [dnnlib.EasyDict(name=name+'both', module=module, opt=opt, interval=1)]
@@ -403,7 +416,8 @@ def training_loop(
         snapshot_data = None
         if (network_snapshot_ticks is not None) and (done or cur_tick % network_snapshot_ticks == 0):
             snapshot_data = dict(training_set_kwargs=dict(training_set_kwargs))
-            for name, module in [('G', G), ('D', D), ('G_ema', G_ema), ('augment_pipe', augment_pipe)]:
+            for name, module in [('G', G), ('D', D), ('G_ema', G_ema), ('augment_pipe', augment_pipe), ('D3d', D3d)] if use_mimic3d \
+                else [('G', G), ('D', D), ('G_ema', G_ema), ('augment_pipe', augment_pipe)]:
                 if module is not None:
                     if num_gpus > 1:
                         misc.check_ddp_consistency(module, ignore_regex=r'.*\.[^.]+_(avg|ema)')

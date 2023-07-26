@@ -30,6 +30,7 @@ class SingleDiscriminator(torch.nn.Module):
         conv_clamp          = 256,      # Clamp the output of convolution layers to +-X, None = disable clamping.
         cmap_dim            = None,     # Dimensionality of mapped conditioning label, None = default.
         sr_upsample_factor  = 1,        # Ignored for SingleDiscriminator
+        disc_c_noise        = 0,        # Corrupt camera parameters with X std dev of noise before disc. pose conditioning.
         block_kwargs        = {},       # Arguments for DiscriminatorBlock.
         mapping_kwargs      = {},       # Arguments for MappingNetwork.
         epilogue_kwargs     = {},       # Arguments for DiscriminatorEpilogue.
@@ -40,6 +41,7 @@ class SingleDiscriminator(torch.nn.Module):
         self.img_resolution_log2 = int(np.log2(img_resolution))
         self.img_channels = img_channels
         self.block_resolutions = [2 ** i for i in range(self.img_resolution_log2, 2, -1)]
+        self.disc_c_noise = disc_c_noise
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions + [4]}
         fp16_resolution = max(2 ** (self.img_resolution_log2 + 1 - num_fp16_res), 8)
 
@@ -74,6 +76,7 @@ class SingleDiscriminator(torch.nn.Module):
 
         cmap = None
         if self.c_dim > 0:
+            if self.disc_c_noise > 0: c += torch.randn_like(c) * c.std(0) * self.disc_c_noise
             cmap = self.mapping(None, c)
         x = self.b4(x, img, cmap)
         return x

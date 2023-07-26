@@ -39,7 +39,7 @@ class TriPlaneGenerator(torch.nn.Module):
         self.ray_sampler = RaySampler()
         self.backbone = StyleGAN2Backbone(z_dim, c_dim, w_dim, img_resolution=256, img_channels=32*3, mapping_kwargs=mapping_kwargs, **synthesis_kwargs)
         self.superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['superresolution_module'], channels=32, img_resolution=img_resolution, sr_num_fp16_res=sr_num_fp16_res, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
-        self.triplane_superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['superresolution_module'], channels=32, img_resolution=rendering_kwargs['tri_res'], sr_num_fp16_res=sr_num_fp16_res, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
+        self.triplane_superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['triplane_superresolution_module'], channels=32, img_resolution=rendering_kwargs['tri_res'], sr_num_fp16_res=sr_num_fp16_res, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
         self.decoder = OSGDecoder(32, {'decoder_lr_mul': rendering_kwargs.get('decoder_lr_mul', 1), 'decoder_output_dim': 32})
         self.neural_rendering_resolution = 64
         self.rendering_kwargs = rendering_kwargs
@@ -89,6 +89,7 @@ class TriPlaneGenerator(torch.nn.Module):
         rgb_image = feature_image[:, :3]
         sr_image = self.superresolution(rgb_image, feature_image, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
 
+        # #################   eg3d upsample stream ######################
         if patch_branch == False:
             return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image} 
 
@@ -101,7 +102,7 @@ class TriPlaneGenerator(torch.nn.Module):
         patch_feature_samples, patch_depth_samples, patch_weights_samples = self.renderer(highres_planes, self.decoder, ray_origins, ray_directions, self.rendering_kwargs) # channels last
         patch_feature_image = patch_feature_samples.permute(0, 2, 1).reshape(N, patch_feature_samples.shape[-1], H, W).contiguous()
         patch_depth_image = patch_depth_samples.permute(0, 2, 1).reshape(N, 1, H, W)
-        patch_rgb_image = patch_feature_image[:, :3] 
+        patch_rgb_image = patch_feature_image[:, :3]
 
         return {'image': patch_rgb_image, 'image_depth': patch_depth_image}
         # return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image}
