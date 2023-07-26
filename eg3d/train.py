@@ -399,9 +399,10 @@ def main(**kwargs):
     # for mimic3
     if opts.use_mimic3d:
         c.D_3d_kwargs = copy.deepcopy(c.D_kwargs)
-        # c.D_3d_kwargs.class_name = 'training.dual_discriminator.SingleDiscriminator'
+        c.D_3d_kwargs.class_name = 'training.dual_discriminator.SingleDiscriminator'
     else:
-        c.D_3d_kwargs = copy.deepcopy(c.D_kwargs)
+        # c.D_3d_kwargs = copy.deepcopy(c.D_kwargs)
+        c.D_3d_kwargs = None
 
     if opts.nobench:
         c.cudnn_benchmark = False
