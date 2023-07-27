@@ -85,7 +85,7 @@ class ImportanceRenderer(torch.nn.Module):
         self.ray_marcher = MipRayMarcher2()
         self.plane_axes = generate_planes()
 
-    def forward(self, planes, decoder, ray_origins, ray_directions, rendering_options):
+    def forward(self, planes, highres_planes, decoder, ray_origins, ray_directions, rendering_options):
         self.plane_axes = self.plane_axes.to(ray_origins.device)
 
         if rendering_options['ray_start'] == rendering_options['ray_end'] == 'auto':
@@ -105,8 +105,7 @@ class ImportanceRenderer(torch.nn.Module):
         sample_coordinates = (ray_origins.unsqueeze(-2) + depths_coarse * ray_directions.unsqueeze(-2)).reshape(batch_size, -1, 3)
         sample_directions = ray_directions.unsqueeze(-2).expand(-1, -1, samples_per_ray, -1).reshape(batch_size, -1, 3)
 
-
-        out = self.run_model(planes, decoder, sample_coordinates, sample_directions, rendering_options)
+        out = self.run_model(planes, None, decoder, sample_coordinates, sample_directions, rendering_options)
         colors_coarse = out['rgb']
         densities_coarse = out['sigma']
         colors_coarse = colors_coarse.reshape(batch_size, num_rays, samples_per_ray, colors_coarse.shape[-1])
@@ -122,7 +121,7 @@ class ImportanceRenderer(torch.nn.Module):
             sample_directions = ray_directions.unsqueeze(-2).expand(-1, -1, N_importance, -1).reshape(batch_size, -1, 3)
             sample_coordinates = (ray_origins.unsqueeze(-2) + depths_fine * ray_directions.unsqueeze(-2)).reshape(batch_size, -1, 3)
 
-            out = self.run_model(planes, decoder, sample_coordinates, sample_directions, rendering_options)
+            out = self.run_model(planes, highres_planes, decoder, sample_coordinates, sample_directions, rendering_options)
             colors_fine = out['rgb']
             densities_fine = out['sigma']
             colors_fine = colors_fine.reshape(batch_size, num_rays, N_importance, colors_fine.shape[-1])
@@ -134,13 +133,17 @@ class ImportanceRenderer(torch.nn.Module):
             # Aggregate
             rgb_final, depth_final, weights = self.ray_marcher(all_colors, all_densities, all_depths, rendering_options)
         else:
-            rgb_final, depth_final, weights = self.ray_marcher(colors_coarse, densities_coarse, depths_coarse, rendering_options)
+            # rgb_final, depth_final, weights = self.ray_marcher(colors_coarse, densities_coarse, depths_coarse, rendering_options)
+            raise RuntimeError("N_importance must be > 0 in mimic3d, this is defined by zhongkaiwu hhh")
 
 
         return rgb_final, depth_final, weights.sum(2)
 
-    def run_model(self, planes, decoder, sample_coordinates, sample_directions, options):
+    def run_model(self, planes, highres_planes, decoder, sample_coordinates, sample_directions, options):
         sampled_features = sample_from_planes(self.plane_axes, planes, sample_coordinates, padding_mode='zeros', box_warp=options['box_warp'])
+        if highres_planes is not None:
+            highres_features = sample_from_planes(self.plane_axes, highres_planes, sample_coordinates, padding_mode='zeros', box_warp=options['box_warp'])
+            sampled_features = sampled_features + highres_features
 
         out = decoder(sampled_features, sample_directions)
         if options.get('density_noise', 0) > 0:

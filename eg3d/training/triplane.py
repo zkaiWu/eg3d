@@ -39,7 +39,7 @@ class TriPlaneGenerator(torch.nn.Module):
         self.ray_sampler = RaySampler()
         self.backbone = StyleGAN2Backbone(z_dim, c_dim, w_dim, img_resolution=256, img_channels=32*3, mapping_kwargs=mapping_kwargs, **synthesis_kwargs)
         self.superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['superresolution_module'], channels=32, img_resolution=img_resolution, sr_num_fp16_res=sr_num_fp16_res, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
-        self.triplane_superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['triplane_superresolution_module'], channels=32, img_resolution=rendering_kwargs['tri_res'], sr_num_fp16_res=sr_num_fp16_res, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
+        self.triplane_superresolution = dnnlib.util.construct_class_by_name(class_name=rendering_kwargs['triplane_superresolution_module'], channels=32, img_resolution=rendering_kwargs['tri_res'], sr_num_fp16_res=0, sr_antialias=rendering_kwargs['sr_antialias'], **sr_kwargs)
         self.decoder = OSGDecoder(32, {'decoder_lr_mul': rendering_kwargs.get('decoder_lr_mul', 1), 'decoder_output_dim': 32})
         self.neural_rendering_resolution = 64
         self.rendering_kwargs = rendering_kwargs
@@ -78,7 +78,15 @@ class TriPlaneGenerator(torch.nn.Module):
         planes = planes.view(len(planes), 3, 32, planes.shape[-2], planes.shape[-1])
 
         # Perform volume rendering
-        feature_samples, depth_samples, weights_samples = self.renderer(planes, self.decoder, ray_origins, ray_directions, self.rendering_kwargs) # channels last
+        if patch_branch:
+            # highres planes for super resolution
+            temp_planes = planes.view(len(planes)*3, 32, planes.shape[-2], planes.shape[-1])
+            # NOTE: need to double check the temp_planes
+            highres_planes, _ = self.triplane_superresolution(temp_planes, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
+            highres_planes = highres_planes.view(len(planes), 3, 32, highres_planes.shape[-2], highres_planes.shape[-1])
+            feature_samples, depth_samples, weights_samples = self.renderer(planes, highres_planes, self.decoder, ray_origins, ray_directions, self.rendering_kwargs)
+        else:
+            feature_samples, depth_samples, weights_samples = self.renderer(planes, None, self.decoder, ray_origins, ray_directions, self.rendering_kwargs) # channels last
 
         # Reshape into 'raw' neural-rendered image
         H = W = self.neural_rendering_resolution
@@ -87,24 +95,13 @@ class TriPlaneGenerator(torch.nn.Module):
 
         # Run superresolution to get final image
         rgb_image = feature_image[:, :3]
-        sr_image = self.superresolution(rgb_image, feature_image, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
 
-        # #################   eg3d upsample stream ######################
-        if patch_branch == False:
+        if patch_branch:
+            return {'image': rgb_image, 'image_depth': depth_image}
+        else:
+            sr_image = self.superresolution(rgb_image, feature_image, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
             return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image} 
 
-        # ################   mimic3d high res stream ######################
-        planes = planes.view(3 * len(planes), 32, planes.shape[-2], planes.shape[-1])
-        # NOTE: get super resolution tri plane, but triplane super resolution model is not ready, so maybe bug here
-        highres_planes = self.triplane_superresolution(rgb_image, planes, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
-
-        # TODO: get patch params for patch rendering
-        patch_feature_samples, patch_depth_samples, patch_weights_samples = self.renderer(highres_planes, self.decoder, ray_origins, ray_directions, self.rendering_kwargs) # channels last
-        patch_feature_image = patch_feature_samples.permute(0, 2, 1).reshape(N, patch_feature_samples.shape[-1], H, W).contiguous()
-        patch_depth_image = patch_depth_samples.permute(0, 2, 1).reshape(N, 1, H, W)
-        patch_rgb_image = patch_feature_image[:, :3]
-
-        return {'image': patch_rgb_image, 'image_depth': patch_depth_image}
         # return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image}
     
     def sample(self, coordinates, directions, z, c, truncation_psi=1, truncation_cutoff=None, update_emas=False, **synthesis_kwargs):
@@ -112,13 +109,13 @@ class TriPlaneGenerator(torch.nn.Module):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
         planes = self.backbone.synthesis(ws, update_emas=update_emas, **synthesis_kwargs)
         planes = planes.view(len(planes), 3, 32, planes.shape[-2], planes.shape[-1])
-        return self.renderer.run_model(planes, self.decoder, coordinates, directions, self.rendering_kwargs)
+        return self.renderer.run_model(planes, None, self.decoder, coordinates, directions, self.rendering_kwargs)
 
     def sample_mixed(self, coordinates, directions, ws, truncation_psi=1, truncation_cutoff=None, update_emas=False, **synthesis_kwargs):
         # Same as sample, but expects latent vectors 'ws' instead of Gaussian noise 'z'
         planes = self.backbone.synthesis(ws, update_emas = update_emas, **synthesis_kwargs)
         planes = planes.view(len(planes), 3, 32, planes.shape[-2], planes.shape[-1])
-        return self.renderer.run_model(planes, self.decoder, coordinates, directions, self.rendering_kwargs)
+        return self.renderer.run_model(planes, None, self.decoder, coordinates, directions, self.rendering_kwargs)
 
     def forward(self, z, c, truncation_psi=1, truncation_cutoff=None, neural_rendering_resolution=None, update_emas=False, cache_backbone=False, use_cached_backbone=False, **synthesis_kwargs):
         # Render a batch of generated images.

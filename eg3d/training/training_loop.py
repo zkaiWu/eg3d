@@ -163,9 +163,10 @@ def training_loop(
     G.register_buffer('dataset_label_std', torch.tensor(training_set.get_label_std()).to(device))
     D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     if use_mimic3d:
-        D3d = dnnlib.util.construct_class_by_name(**D_3d_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+        D3d_common_kwargs = copy.deepcopy(common_kwargs)
+        D3d_common_kwargs['img_resolution'] = loss_kwargs.patch_cfg['patch_res']
+        D3d = dnnlib.util.construct_class_by_name(**D_3d_kwargs, **D3d_common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     
-    import pdb; pdb.set_trace()
     G_ema = copy.deepcopy(G).eval()
 
     # Resume from existing pickle.
@@ -208,7 +209,6 @@ def training_loop(
     # Setup training phases.
     if rank == 0:
         print('Setting up training phases...')
-    import pdb; pdb.set_trace()
     loss = dnnlib.util.construct_class_by_name(device=device, G=G, D=D, D3d=D3d, augment_pipe=augment_pipe, **loss_kwargs) if use_mimic3d \
             else dnnlib.util.construct_class_by_name(device=device, G=G, D=D, D3d=None, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
     phases = []
@@ -218,6 +218,7 @@ def training_loop(
     ]
     if use_mimic3d:
         module_list.append(('D3d', D3d, D_3d_opt_kwargs, D_reg_interval))
+
     for name, module, opt_kwargs, reg_interval in module_list:
         if reg_interval is None:
             opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs) # subclass of torch.optim.Optimizer

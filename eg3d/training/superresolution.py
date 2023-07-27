@@ -300,21 +300,25 @@ class TriplaneSuperresolutionHybrid2X(torch.nn.Module):
         assert img_resolution == 256 
 
         use_fp16 = sr_num_fp16_res > 0
-        self.input_resolution = 64
+        self.input_resolution = 256 
         self.sr_antialias = sr_antialias
-        self.block0 = SynthesisBlockNoUp(channels, 128, w_dim=512, resolution=64,
+        self.channels = channels
+        self.block0 = SynthesisBlockNoUp(channels, 32, w_dim=512, resolution=256,
                 img_channels=3, is_last=False, use_fp16=use_fp16, conv_clamp=(256 if use_fp16 else None), **block_kwargs)
-        self.block1 = SynthesisBlock(128, 64, w_dim=512, resolution=128,
-                img_channels=3, is_last=True, use_fp16=use_fp16, conv_clamp=(256 if use_fp16 else None), **block_kwargs)
+        self.block1 = SynthesisBlock(32, 32, w_dim=512, resolution=512,
+                img_channels=3, is_last=False, use_fp16=use_fp16, conv_clamp=(256 if use_fp16 else None), **block_kwargs)
         self.register_buffer('resample_filter', upfirdn2d.setup_filter([1,3,3,1]))
 
     def forward(self, x, ws, **block_kwargs):
         ws = ws[:, -1:, :].repeat(1, 3, 1)
+        ws = ws.repeat_interleave(3, dim=0)
 
         if x.shape[-1] != self.input_resolution:
+            x = x.view(-1, self.channels, x.shape[-1], x.shape[-2])
             x = torch.nn.functional.interpolate(x, size=(self.input_resolution, self.input_resolution),
                                                   mode='bilinear', align_corners=False, antialias=self.sr_antialias)
+            x = x.view(-1, 3, self.channels, self.input_resolution, self.input_resolution)
 
         x, rgb = self.block0(x, None, ws, **block_kwargs)
         x, rgb = self.block1(x, None, ws, **block_kwargs)
-        return rgb
+        return x, rgb

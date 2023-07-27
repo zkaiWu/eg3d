@@ -9,7 +9,7 @@ def sample_patch_params(batch_size:int, patch_cfg, device:str='cuda'):
     scale = patch_cfg['patch_res'] / patch_cfg['hr_res']
     offsets = torch.rand(batch_size, 2, device=device) * (1 - scale)
 
-    return {'scales': torch.tensor([scale, scale] * batch_size).to(device), 'offsets': offsets}
+    return {'scales': torch.tensor([[scale, scale]]).repeat(batch_size, 1).to(device), 'offsets': offsets}
     
 
 
