@@ -97,7 +97,7 @@ def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind=
     c = c.repeat(len(zs), 1)
     ws = G.mapping(z=zs, c=c, truncation_psi=psi, truncation_cutoff=truncation_cutoff)
     import pdb; pdb.set_trace()
-    _ = G.synthesis(ws[:1], c[:1], patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None) # warm up
+    _ = G.synthesis(ws[:1], c[:1], patch_branch=use_mimic3d) # warm up
     ws = ws.reshape(grid_h, grid_w, num_keyframes, *ws.shape[1:])
 
     # Interpolation.
@@ -145,12 +145,12 @@ def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind=
                                                                     radius=G.rendering_kwargs['avg_camera_radius'], device=device).reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
                     
                     w_c = G.mapping(z=zs[0:1], c=c[0:1], truncation_psi=psi, truncation_cutoff=truncation_cutoff)
-                    img = G.synthesis(ws=w_c, c=c_forward, noise_mode='const', patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None)[image_mode][0]
+                    img = G.synthesis(ws=w_c, c=c_forward, noise_mode='const', patch_branch=use_mimic3d)[image_mode][0]
                 elif entangle == 'camera':
-                    img = G.synthesis(ws=w.unsqueeze(0), c=c[0:1], noise_mode='const', patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None)[image_mode][0]
+                    img = G.synthesis(ws=w.unsqueeze(0), c=c[0:1], noise_mode='const', patch_branch=use_mimic3d)[image_mode][0]
                 elif entangle == 'both':
                     w_c = G.mapping(z=zs[0:1], c=c[0:1], truncation_psi=psi, truncation_cutoff=truncation_cutoff)
-                    img = G.synthesis(ws=w_c, c=c[0:1], noise_mode='const', patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None)[image_mode][0]
+                    img = G.synthesis(ws=w_c, c=c[0:1], noise_mode='const', patch_branch=use_mimic3d)[image_mode][0]
 
                 if image_mode == 'image_depth':
                     img = -img
