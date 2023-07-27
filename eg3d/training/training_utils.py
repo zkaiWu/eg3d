@@ -39,9 +39,9 @@ def compute_patch_coords(patch_params: Dict, resolution: int, align_corners: boo
     # Finally, apply the offset converted from [0, 1] to [0, 2]
     coords = (coords + 1.0) * patch_scales.view(batch_size, 1, 1, 2) - 1.0 + patch_offsets.view(batch_size, 1, 1, 2) * 2.0 # [batch_size, out_h, out_w, 2]
 
-    if for_grid_sample:
-        # Transforming the coords to the layout of `F.grid_sample`
-        coords[:, :, :, 1] = -coords[:, :, :, 1] # [batch_size, out_h, out_w]
+    # if for_grid_sample:
+    #     # Transforming the coords to the layout of `F.grid_sample`
+    #     coords[:, :, :, 1] = -coords[:, :, :, 1] # [batch_size, out_h, out_w]
 
     return coords
 
@@ -51,15 +51,16 @@ def generate_coords(batch_size: int, img_size: int, device='cpu', align_corners:
     Generates the coordinates in [-1, 1] range for a square image
     if size (img_size x img_size) in such a way that
     - upper left corner: coords[idx, 0, 0] = (-1, 1)
-    - lower right corner: coords[idx, -1, -1] = (1, -1)
-    In this way, the `y` axis is flipped to follow image memory layout
+    # - lower right corner: coords[idx, -1, -1] = (1, -1)
+    # In this way, the `y` axis is flipped to follow image memory layout
+    - lower right corner: coords[idx, -1, -1] = (-1, 1) 
     """
     if align_corners:
         row = torch.linspace(-1, 1, img_size, device=device).float() # [img_size]
     else:
         row = (torch.arange(0, img_size, device=device).float() / img_size) * 2 - 1 # [img_size]
     x_coords = row.view(1, -1).repeat(img_size, 1) # [img_size, img_size]
-    y_coords = -x_coords.t() # [img_size, img_size]
+    y_coords = x_coords.t() # [img_size, img_size]
 
     coords = torch.stack([x_coords, y_coords], dim=2) # [img_size, img_size, 2]
     coords = coords.view(-1, 2) # [img_size ** 2, 2]

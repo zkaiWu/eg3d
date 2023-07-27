@@ -345,6 +345,7 @@ def main(**kwargs):
     else:
         assert False, "Need to specify config"
 
+    c.loss_kwargs.use_mimic3d = opts.use_mimic3d
     patch_cfg = {
         'patch_res': 64,
         'hr_res': 256

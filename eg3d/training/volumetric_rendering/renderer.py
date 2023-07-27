@@ -143,6 +143,7 @@ class ImportanceRenderer(torch.nn.Module):
         sampled_features = sample_from_planes(self.plane_axes, planes, sample_coordinates, padding_mode='zeros', box_warp=options['box_warp'])
         if highres_planes is not None:
             highres_features = sample_from_planes(self.plane_axes, highres_planes, sample_coordinates, padding_mode='zeros', box_warp=options['box_warp'])
+            # highres_features.fill_(0.0)      # using 0 for debugging
             sampled_features = sampled_features + highres_features
 
         out = decoder(sampled_features, sample_directions)
