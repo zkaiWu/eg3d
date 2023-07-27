@@ -71,7 +71,7 @@ def create_samples(N=256, voxel_origin=[0, 0, 0], cube_length=2.0):
 
 #----------------------------------------------------------------------------
 
-def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind='cubic', grid_dims=(1,1), num_keyframes=None, wraps=2, psi=1, truncation_cutoff=14, cfg='FFHQ', image_mode='image', gen_shapes=False, device=torch.device('cuda'), **video_kwargs):
+def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind='cubic', grid_dims=(1,1), num_keyframes=None, wraps=2, psi=1, truncation_cutoff=14, cfg='FFHQ', image_mode='image', gen_shapes=False, device=torch.device('cuda'), use_mimic3d=False, **video_kwargs):
     grid_w = grid_dims[0]
     grid_h = grid_dims[1]
 
@@ -96,7 +96,8 @@ def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind=
     c = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
     c = c.repeat(len(zs), 1)
     ws = G.mapping(z=zs, c=c, truncation_psi=psi, truncation_cutoff=truncation_cutoff)
-    _ = G.synthesis(ws[:1], c[:1]) # warm up
+    import pdb; pdb.set_trace()
+    _ = G.synthesis(ws[:1], c[:1], patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None) # warm up
     ws = ws.reshape(grid_h, grid_w, num_keyframes, *ws.shape[1:])
 
     # Interpolation.
@@ -144,12 +145,12 @@ def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind=
                                                                     radius=G.rendering_kwargs['avg_camera_radius'], device=device).reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
                     
                     w_c = G.mapping(z=zs[0:1], c=c[0:1], truncation_psi=psi, truncation_cutoff=truncation_cutoff)
-                    img = G.synthesis(ws=w_c, c=c_forward, noise_mode='const')[image_mode][0]
+                    img = G.synthesis(ws=w_c, c=c_forward, noise_mode='const', patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None)[image_mode][0]
                 elif entangle == 'camera':
-                    img = G.synthesis(ws=w.unsqueeze(0), c=c[0:1], noise_mode='const')[image_mode][0]
+                    img = G.synthesis(ws=w.unsqueeze(0), c=c[0:1], noise_mode='const', patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None)[image_mode][0]
                 elif entangle == 'both':
                     w_c = G.mapping(z=zs[0:1], c=c[0:1], truncation_psi=psi, truncation_cutoff=truncation_cutoff)
-                    img = G.synthesis(ws=w_c, c=c[0:1], noise_mode='const')[image_mode][0]
+                    img = G.synthesis(ws=w_c, c=c[0:1], noise_mode='const', patch_branch=use_mimic3d, neural_rendering_resolution=256 if use_mimic3d else None)[image_mode][0]
 
                 if image_mode == 'image_depth':
                     img = -img
@@ -256,6 +257,7 @@ def parse_tuple(s: Union[str, Tuple[int,int]]) -> Tuple[int, int]:
 @click.option('--nrr', type=int, help='Neural rendering resolution override', default=None, show_default=True)
 @click.option('--shapes', type=bool, help='Gen shapes for shape interpolation', default=False, show_default=True)
 @click.option('--interpolate', type=bool, help='Interpolate between seeds', default=True, show_default=True)
+@click.option('--use_mimic3d', type=bool, help='Use mimic3d', default=False, show_default=True)
 def generate_images(
     network_pkl: str,
     seeds: List[int],
@@ -273,6 +275,7 @@ def generate_images(
     nrr: Optional[int],
     shapes: bool,
     interpolate: bool,
+    use_mimic3d: bool,
 ):
     """Render a latent vector interpolation video.
 
@@ -304,7 +307,6 @@ def generate_images(
     with dnnlib.util.open_url(network_pkl) as f:
         G = legacy.load_network_pkl(f)['G_ema'].to(device) # type: ignore
 
-
     G.rendering_kwargs['depth_resolution'] = int(G.rendering_kwargs['depth_resolution'] * sampling_multiplier)
     G.rendering_kwargs['depth_resolution_importance'] = int(G.rendering_kwargs['depth_resolution_importance'] * sampling_multiplier)
     if nrr is not None: G.neural_rendering_resolution = nrr
@@ -316,12 +318,12 @@ def generate_images(
 
     if interpolate:
         output = os.path.join(outdir, 'interpolation.mp4')
-        gen_interp_video(G=G, mp4=output, bitrate='10M', grid_dims=grid, num_keyframes=num_keyframes, w_frames=w_frames, seeds=seeds, shuffle_seed=shuffle_seed, psi=truncation_psi, truncation_cutoff=truncation_cutoff, cfg=cfg, image_mode=image_mode, gen_shapes=shapes)
+        gen_interp_video(G=G, mp4=output, bitrate='10M', grid_dims=grid, num_keyframes=num_keyframes, w_frames=w_frames, seeds=seeds, shuffle_seed=shuffle_seed, psi=truncation_psi, truncation_cutoff=truncation_cutoff, cfg=cfg, image_mode=image_mode, gen_shapes=shapes, use_mimic3d=use_mimic3d)
     else:
         for seed in seeds:
             output = os.path.join(outdir, f'{seed}.mp4')
             seeds_ = [seed]
-            gen_interp_video(G=G, mp4=output, bitrate='10M', grid_dims=grid, num_keyframes=num_keyframes, w_frames=w_frames, seeds=seeds_, shuffle_seed=shuffle_seed, psi=truncation_psi, truncation_cutoff=truncation_cutoff, cfg=cfg, image_mode=image_mode)
+            gen_interp_video(G=G, mp4=output, bitrate='10M', grid_dims=grid, num_keyframes=num_keyframes, w_frames=w_frames, seeds=seeds_, shuffle_seed=shuffle_seed, psi=truncation_psi, truncation_cutoff=truncation_cutoff, cfg=cfg, image_mode=image_mode, use_mimic3d=use_mimic3d)
 
 #----------------------------------------------------------------------------
 

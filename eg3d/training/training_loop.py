@@ -133,6 +133,8 @@ def training_loop(
     # Initialize.
     start_time = time.time()
     device = torch.device('cuda', rank)
+    torch.cuda.set_device(device)                       # add this code for memory balanced
+    torch.cuda.empty_cache()
     np.random.seed(random_seed * num_gpus + rank)
     torch.manual_seed(random_seed * num_gpus + rank)
     torch.backends.cudnn.benchmark = cudnn_benchmark    # Improves training speed.
@@ -200,7 +202,7 @@ def training_loop(
     # Distribute across GPUs.
     if rank == 0:
         print(f'Distributing across {num_gpus} GPUs...')
-    for module in [G, D, G_ema, augment_pipe, D3d] if use_mimic3d else [G, D, G_ema, augment_pipe]:
+    for module in [G, D, G_ema, augment_pipe, D3d]:
         if module is not None:
             for param in misc.params_and_buffers(module):
                 if param.numel() > 0 and num_gpus > 1:
