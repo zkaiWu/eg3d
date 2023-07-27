@@ -7,7 +7,7 @@ import torch
 def parse_args():
     parser = argparse.ArgumentParser(description='Blender 64x64 to 256x256 using floyd')
     parser.add_argument('--output_dir', required=True, type=str, help='where to output the camera path json')
-    parser.add_argument('--radius_range', nargs='+', type=float, default=[1.0, 1.0], help='radius range')
+    parser.add_argument('--radius_range', nargs='+', type=float, default=[3.5, 3.5], help='radius range')
     # parser.add_argument('--pitch_range', nargs='+', type=float, default=[0.0, 0.0], help='pitch range')
     # parser.add_argument('--yaw_range', nargs='+', type=float, default=[0.0, 0.0], help='yaw range')
     parser.add_argument('--resolution', type=int, default=800, help='resolution')
@@ -17,15 +17,16 @@ def parse_args():
     return args
 
 
-
 def normalize_torch(x: torch.Tensor, dim: int=-1) -> torch.Tensor:
     """
     Normalize vector lengths.
     """
     return x / (torch.norm(x, dim=dim, keepdim=True))
 
+
 def normalize_np(x: np.ndarray, axis: int=-1):
     return x / (np.linalg.norm(x, axis=axis, keepdims=True))
+
 
 def calc_camera_matrix(pitch, yaw, radius):
 
