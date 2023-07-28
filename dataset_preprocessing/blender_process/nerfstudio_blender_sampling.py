@@ -72,10 +72,11 @@ def sample_pose_camera_path(args):
         # pitch = np.random.uniform(args.yaw_range[0], args.yaw_range[1])
         # yaw = np.random.uniform(args.pitch_range[0], args.pitch_range[1])
         gamma_p = np.random.uniform(0, 2*np.pi)
-        gamma_y = np.random.uniform(0, 0.)
+        gamma_y = np.random.uniform(0, 0.5)
         pitch = gamma_p
         yaw = np.arccos(1 - 2 * gamma_y)
         radius = np.random.uniform(args.radius_range[0], args.radius_range[1])
+        print(f'radius: {radius}')
         # print(pitch)
         # print(yaw)
         # print(radius)

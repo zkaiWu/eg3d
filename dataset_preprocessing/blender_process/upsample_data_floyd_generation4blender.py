@@ -153,37 +153,31 @@ def copy_json(args):
     input_dir = args.input_dir 
     output_dir = args.output_dir
 
+    json_output_dict = {
+        "labels": {}
+    }
+
+    json_path = os.path.join(input_dir, 'dataset_blender.json')
+    with open(json_path, 'r') as f:
+        meta_data = json.load(f)
+    camera_paths = meta_data["camera_path"]
+    for cp in camera_paths:
+        camera_params = cp['camera_to_world']
+        for per_view_idx in range(args.image_per_view):
+            json_output_dict["labels"][f"{os.path.basename(cp['image_path']).rstrip('.png')}_{per_view_idx}.png"] \
+                = camera_params
+
+    json_output_dict['cam_radius'] = meta_data['cam_radius']
+    json_output_dict['fov'] = meta_data['fov']
+
+
+
     for obj_name in os.listdir(input_dir):
         output_obj_name = obj_name 
         obj_dir = os.path.join(input_dir, obj_name)
-        if not os.path.isdir(obj_dir):
-            continue
 
-        for sub_name in os.listdir(obj_dir):
-            print(obj_dir)
-            print(sub_name)
-
-            if sub_name == 'meta.json':
-                json_output_dict = {
-                    "labels": {}
-                }
-
-                json_path = os.path.join(obj_dir, sub_name)
-                with open(json_path, 'r') as f:
-                    meta_data = json.load(f)
-                
-                for i, meta in enumerate(meta_data):
-                    camera_params = meta['camera_params']
-                    for per_view_idx in range(args.image_per_view):
-                        # json_output_dict['labels'].append({f"{i}_{per_view_idx}.png": camera_params[0]})
-                        json_output_dict['labels'][f"{i}_{per_view_idx}.png"] = camera_params[0]
-
-                json_output_dict['cam_pivot'] = meta_data[0]['cam_pivot']
-                json_output_dict['cam_radius'] = meta_data[0]['cam_radius']
-
-                os.makedirs(output_dir, exist_ok=True)
-                with open(os.path.join(output_dir, 'dataset.json'), 'w') as f:
-                    json.dump(json_output_dict, f, indent=4)
+        with open(os.path.join(obj_dir, 'dataset_eg3d', 'r')) as jfp:
+            json.dump(json_output_dict, jfp, indent=4)
 
 
 def parse_args():
@@ -209,7 +203,7 @@ def parse_args():
 def main(args):
     world_size = args.world_size
     print(world_size)
-    # copy_json(args)
+    copy_json(args)
     mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
 
 
