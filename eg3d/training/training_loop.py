@@ -169,6 +169,7 @@ def training_loop(
             misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
 
     # Print network summary tables.
+    import pdb; pdb.set_trace()
     if rank == 0:
         z = torch.empty([batch_gpu, G.z_dim], device=device)
         c = torch.empty([batch_gpu, G.c_dim], device=device)
@@ -359,6 +360,7 @@ def training_loop(
                 print()
                 print('Aborting...')
 
+        import pdb; pdb.set_trace()
         # Save image snapshot.
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             out = [G_ema(z=z, c=c, noise_mode='const') for z, c in zip(grid_z, grid_c)]
@@ -424,6 +426,7 @@ def training_loop(
                 stats_metrics.update(result_dict.results)
         del snapshot_data # conserve memory
 
+
         # Collect statistics.
         for phase in phases:
             value = []
@@ -433,6 +436,7 @@ def training_loop(
             training_stats.report0('Timing/' + phase.name, value)
         stats_collector.update()
         stats_dict = stats_collector.as_dict()
+
 
         # Update logs.
         timestamp = time.time()
@@ -451,6 +455,7 @@ def training_loop(
         if progress_fn is not None:
             progress_fn(cur_nimg // 1000, total_kimg)
 
+        import pdb; pdb.set_trace()
         # Update state.
         cur_tick += 1
         tick_start_nimg = cur_nimg
