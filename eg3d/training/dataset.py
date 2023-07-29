@@ -228,7 +228,7 @@ class ImageFolderDataset(Dataset):
         return image
 
     def _load_raw_labels(self):
-        fname = 'dataset.json'
+        fname = 'dataset_eg3d.json'
         if fname not in self._all_fnames:
             return None
         with self._open_file(fname) as f:
