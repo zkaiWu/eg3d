@@ -21,6 +21,7 @@ import PIL.Image as Image
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from transformers import T5Tokenizer, T5EncoderModel
+import numpy as np
 
 
 
@@ -157,26 +158,41 @@ def copy_json(args):
         "labels": {}
     }
 
+    # cal intrinsic matrix 
+    fov = 50
+    intrinsic_matrix = np.zeros((3, 3))
+    intrinsic_matrix[2, 2] = 1.0
+    intrinsic_matrix[0, 0] = intrinsic_matrix[1, 1] = 1.0 / (2 * np.tan(fov * np.pi / 360))
+    intrinsic_matrix[0, 2] = intrinsic_matrix[1, 2] = 0.5
+    intrinsic_matrix = intrinsic_matrix.reshape(9).tolist()
+
     json_path = os.path.join(input_dir, 'dataset_blender.json')
     with open(json_path, 'r') as f:
         meta_data = json.load(f)
     camera_paths = meta_data["camera_path"]
-    for cp in camera_paths:
+    for i, cp in enumerate(camera_paths):
         camera_params = cp['camera_to_world']
+        camera_params = np.array(camera_params).reshape(4, 4)
+        # flip the x and z axis to adapt to the eg3d camera coordinate system
+        camera_params[1, :] = -camera_params[1, :]
+        camera_params[2, :] = -camera_params[2, :]
+        camera_params = camera_params.reshape(16).tolist()
+        # add instrinsic matrix
+        camera_params.extend(intrinsic_matrix)
+
         for per_view_idx in range(args.image_per_view):
-            json_output_dict["labels"][f"{os.path.basename(cp['image_path']).rstrip('.png')}_{per_view_idx}.png"] \
-                = camera_params
+            # json_output_dict["labels"][f"{os.path.basename(cp['image_path']).rstrip('.png')}_{per_view_idx}.png"] \
+            #     = camera_params
+            json_output_dict['labels'][f'{i:05d}_{per_view_idx}.png'] = camera_params
 
-    json_output_dict['cam_radius'] = meta_data['cam_radius']
-    json_output_dict['fov'] = meta_data['fov']
+    # json_output_dict['cam_radius'] = meta_data['cam_radius']
 
-
-
-    for obj_name in os.listdir(input_dir):
+    for obj_name in os.listdir(output_dir):
         output_obj_name = obj_name 
-        obj_dir = os.path.join(input_dir, obj_name)
+        obj_dir = os.path.join(output_dir, obj_name)
+        print(obj_dir)
 
-        with open(os.path.join(obj_dir, 'dataset_eg3d', 'r')) as jfp:
+        with open(os.path.join(obj_dir, 'dataset_eg3d.json'), 'w') as jfp:
             json.dump(json_output_dict, jfp, indent=4)
 
 
@@ -204,7 +220,7 @@ def main(args):
     world_size = args.world_size
     print(world_size)
     copy_json(args)
-    mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
+    # mp.spawn(image_sr, args=(world_size, args), nprocs=world_size, join=True)
 
 
 """
