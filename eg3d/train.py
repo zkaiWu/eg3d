@@ -342,6 +342,16 @@ def main(**kwargs):
             'avg_camera_radius': 1.7,
             'avg_camera_pivot': [0, 0, 0],
         })
+    elif opts.cfg == 'blender':
+        rendering_options.update({
+            'depth_resolution': 48, # number of uniform samples to take per ray.
+            'depth_resolution_importance': 48, # number of importance samples to take per ray.
+            'ray_start': 1.5, # near point along each ray to start taking samples.
+            'ray_end': 5.5, # far point along each ray to stop taking samples. 
+            'box_warp': 3, # the side-length of the bounding box spanned by the tri-planes; box_warp=1 means [-0.5, -0.5, -0.5] -> [0.5, 0.5, 0.5].
+            'avg_camera_radius': 3.5, # used only in the visualizer to specify camera orbit radius.
+            'avg_camera_pivot': [0, 0, 0.2], # used only in the visualizer to control center of camera rotation.
+        })
     else:
         assert False, "Need to specify config"
 
