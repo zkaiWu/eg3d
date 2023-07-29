@@ -195,7 +195,7 @@ def parse_comma_separated_list(s):
 @click.option('--decoder_lr_mul',    help='decoder learning rate multiplier.', metavar='FLOAT', type=click.FloatRange(min=0), default=1, required=False, show_default=True)
 
 # Config for mimic3d
-@click.option('--use_mimic3d', help='If true, using mimic3d strategy.', metavar='BOOL',  type=bool, required=False, default=True)
+@click.option('--use_mimic3d', help='If true, using mimic3d strategy.', metavar='BOOL',  type=bool, required=False, default=False)
 @click.option('--tri_res',    help='resolution for triplane super resolution module', metavar='INT',   type=click.IntRange(min=1), default=256, show_default=True)
 @click.option('--resume_from',  help='using eg3d for tunning a eg3d or using mimic3d for recover mimic3d training', metavar='STR',   type=click.Choice(['eg3d', 'mimic3d']), default='eg3d', show_default=True)
 def main(**kwargs):
