@@ -44,6 +44,7 @@ class TriPlaneGenerator(torch.nn.Module):
         self.neural_rendering_resolution = 64
         self.rendering_kwargs = rendering_kwargs
         self.use_mimic3d = rendering_kwargs['use_mimic3d']
+        self.render_batch_size = 4096
     
         self._last_planes = None
     
@@ -84,9 +85,11 @@ class TriPlaneGenerator(torch.nn.Module):
             # NOTE: need to double check the temp_planes
             highres_planes, _ = self.triplane_superresolution(temp_planes, ws, noise_mode=self.rendering_kwargs['superresolution_noise_mode'], **{k:synthesis_kwargs[k] for k in synthesis_kwargs.keys() if k != 'noise_mode'})
             highres_planes = highres_planes.view(len(planes), 3, 32, highres_planes.shape[-2], highres_planes.shape[-1])
-            feature_samples, depth_samples, weights_samples = self.renderer(planes, highres_planes, self.decoder, ray_origins, ray_directions, self.rendering_kwargs)
+            # feature_samples, depth_samples, weights_samples = self.renderer(planes, highres_planes, self.decoder, ray_origins, ray_directions, self.rendering_kwargs)
+            feature_samples, depth_samples, weights_samples = self.render_batch(self.renderer, planes, None, self.decoder, ray_origins, ray_directions, self.rendering_kwargs)
         else:
-            feature_samples, depth_samples, weights_samples = self.renderer(planes, None, self.decoder, ray_origins, ray_directions, self.rendering_kwargs) # channels last
+            feature_samples, depth_samples, weights_samples = self.render_batch(self.renderer, planes, None, self.decoder, ray_origins, ray_directions, self.rendering_kwargs)
+            # feature_samples, depth_samples, weights_samples = self.renderer(planes, None, self.decoder, ray_origins, ray_directions, self.rendering_kwargs) # channels last
 
         # Reshape into 'raw' neural-rendered image
         H = W = self.neural_rendering_resolution
@@ -103,6 +106,33 @@ class TriPlaneGenerator(torch.nn.Module):
             return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image} 
 
         # return {'image': sr_image, 'image_raw': rgb_image, 'image_depth': depth_image}
+
+    def render_batch(self, render, planes, highred_planes, decoder, ray_origins, ray_directions, rendering_kwargs):
+
+        B, N, _ = ray_origins.shape
+        feature_samples_list = []
+        depth_samples_list = []
+        weights_samples_list = []
+
+        for i in range(0, N, self.render_batch_size):
+            # start_idx = i * self.render_batch_size
+            # end_idx = min((i+1) * self.render_batch_size, N)
+            feature_samples_batch, depth_samples_batch, weights_samples_batch \
+                = render(planes, highred_planes, decoder, \
+                    ray_origins[:, i:i+self.render_batch_size], ray_directions[:, i:i+self.render_batch_size], \
+                    rendering_kwargs)
+            
+            feature_samples_list.append(feature_samples_batch)
+            depth_samples_list.append(depth_samples_batch)
+            weights_samples_list.append(weights_samples_batch)
+        
+        feature_samples = torch.cat(feature_samples_list, dim=1)
+        depth_samples = torch.cat(depth_samples_list, dim=1)
+        weights_samples = torch.cat(weights_samples_list, dim=1)
+
+        # feature_samples, depth_samples, weights_samples = render(planes, highred_planes, decoder, ray_origins, ray_directions, rendering_kwargs)
+
+        return feature_samples, depth_samples, weights_samples
     
     def sample(self, coordinates, directions, z, c, truncation_psi=1, truncation_cutoff=None, update_emas=False, **synthesis_kwargs):
         # Compute RGB features, density for arbitrary 3D coordinates. Mostly used for extracting shapes. 
