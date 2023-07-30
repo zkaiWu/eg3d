@@ -144,7 +144,6 @@ def training_loop(
     conv2d_gradfix.enabled = True                       # Improves training speed. # TODO: ENABLE
     grid_sample_gradfix.enabled = False                  # Avoids errors with the augmentation pipe.
 
-    import pdb; pdb.set_trace()
 
     # Load training set.
     if rank == 0:
@@ -159,7 +158,6 @@ def training_loop(
         print('Label shape:', training_set.label_shape)
         print()
 
-    import pdb; pdb.set_trace()
 
     # Construct networks.
     if rank == 0:
@@ -175,7 +173,6 @@ def training_loop(
     
     G_ema = copy.deepcopy(G).eval()
 
-    import pdb; pdb.set_trace()
     # Resume from existing pickle.
     if (resume_pkl is not None) and (rank == 0):
         print(f'Resuming from "{resume_pkl}"')
@@ -186,7 +183,6 @@ def training_loop(
             misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
 
 
-    import pdb; pdb.set_trace()
     # Print network summary tables.
     if rank == 0:
         z = torch.empty([batch_gpu, G.z_dim], device=device)
@@ -195,7 +191,6 @@ def training_loop(
         misc.print_module_summary(D, [img, c])
 
 
-    import pdb; pdb.set_trace()
     # Setup augmentation.
     if rank == 0:
         print('Setting up augmentation...')
@@ -209,7 +204,6 @@ def training_loop(
             ada_stats = training_stats.Collector(regex='Loss/signs/real')
 
 
-    import pdb; pdb.set_trace()
     # Distribute across GPUs.
     if rank == 0:
         print(f'Distributing across {num_gpus} GPUs...')
@@ -219,7 +213,6 @@ def training_loop(
                 if param.numel() > 0 and num_gpus > 1:
                     torch.distributed.broadcast(param, src=0)
 
-    import pdb; pdb.set_trace()
     # Setup training phases.
     if rank == 0:
         print('Setting up training phases...')
@@ -253,7 +246,6 @@ def training_loop(
             phase.end_event = torch.cuda.Event(enable_timing=True)
 
     # Export sample images.
-    import pdb; pdb.set_trace()
     grid_size = None
     grid_z = None
     grid_c = None
@@ -265,7 +257,6 @@ def training_loop(
         grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
 
     # Initialize logs.
-    import pdb; pdb.set_trace()
     if rank == 0:
         print('Initializing logs...')
     stats_collector = training_stats.Collector(regex='.*')
@@ -281,7 +272,6 @@ def training_loop(
             print('Skipping tfevents export:', err)
 
     # Train.
-    import pdb; pdb.set_trace()
     if rank == 0:
         print(f'Training for {total_kimg} kimg...')
         print()
@@ -296,8 +286,6 @@ def training_loop(
     while True:
 
         # Fetch training data.
-
-        import pdb; pdb.set_trace()
         with torch.autograd.profiler.record_function('data_fetch'):
             phase_real_img, phase_real_c = next(training_set_iterator)
             phase_real_img = (phase_real_img.to(device).to(torch.float32) / 127.5 - 1).split(batch_gpu)
@@ -501,8 +489,6 @@ def training_loop(
         maintenance_time = tick_start_time - tick_end_time
         if done:
             break
-
-        import pdb; pdb.set_trace()
 
     # Done.
     if rank == 0:
