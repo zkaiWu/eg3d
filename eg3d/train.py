@@ -335,15 +335,13 @@ def main(**kwargs):
             'depth_resolution_importance': 48,
             'ray_start': 1.5,
             'ray_end': 5.5,
-            'box_warp': 1.6,            # this paramete should be adjust
-            # 'white_back': True,
+            'box_warp': 3.0,            # this paramete should be adjust
             'avg_camera_radius': 3.5,
             'avg_camera_pivot': [0, 0, 0],
         })
         
     else:
         assert False, "Need to specify config"
-
 
     if opts.density_reg > 0:
         c.G_reg_interval = opts.density_reg_every
