@@ -331,11 +331,12 @@ def main(**kwargs):
         })
     elif opts.cfg == 'blender':
         rendering_options.update({
-            'depth_resolution': 48,
-            'depth_resolution_importance': 48,
+            'depth_resolution': 64,
+            'depth_resolution_importance': 64,
             'ray_start': 1.5,
             'ray_end': 5.5,
             'box_warp': 3.0,            # this paramete should be adjust
+            'white_back': True,
             'avg_camera_radius': 3.5,
             'avg_camera_pivot': [0, 0, 0],
         })

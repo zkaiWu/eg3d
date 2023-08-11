@@ -23,5 +23,5 @@ CUDA_VISIBLE_DEVICES=$CIDX python train.py \
     --gpus=$GPU_NUM \
     --batch=$BATCH_SIZE \
     --gamma=1 \
-    --gen_pose_cond=False \
+    --gen_pose_cond=True \
     --kimg 10000 \
